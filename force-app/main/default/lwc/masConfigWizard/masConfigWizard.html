@@ -1,0 +1,316 @@
+<template>
+    <lightning-card title="Mass Action Configuration" icon-name="standard:settings">
+        <div slot="actions">
+            <lightning-button
+                label="Run Now"
+                variant="brand"
+                icon-name="utility:play"
+                onclick={handleRunNow}
+                disabled={isLoading}
+            ></lightning-button>
+        </div>
+
+        <template if:true={isLoading}>
+            <lightning-spinner alternative-text="Loading" size="small"></lightning-spinner>
+        </template>
+
+        <div class="slds-p-horizontal_medium">
+            <!-- ========================= Basics ========================= -->
+            <div class="slds-section slds-is-open">
+                <h3 class="slds-section__title slds-p-vertical_x-small">
+                    <span class="slds-truncate slds-p-horizontal_small">Configuration Basics</span>
+                </h3>
+                <div class="slds-grid slds-wrap slds-gutters">
+                    <div class="slds-col slds-size_1-of-2">
+                        <lightning-input
+                            label="Name"
+                            data-field="Name"
+                            value={config.Name}
+                            onchange={handleFieldChange}
+                        ></lightning-input>
+                    </div>
+                    <div class="slds-col slds-size_1-of-2">
+                        <lightning-input
+                            label="Developer Name"
+                            data-field="Developer_Name__c"
+                            value={config.Developer_Name__c}
+                            onchange={handleFieldChange}
+                        ></lightning-input>
+                    </div>
+                    <div class="slds-col slds-size_1-of-1">
+                        <lightning-textarea
+                            label="Description"
+                            data-field="Description__c"
+                            value={config.Description__c}
+                            onchange={handleFieldChange}
+                        ></lightning-textarea>
+                    </div>
+                    <div class="slds-col slds-size_1-of-2">
+                        <lightning-input
+                            type="number"
+                            label="Batch Size"
+                            data-field="Batch_Size__c"
+                            value={config.Batch_Size__c}
+                            field-level-help="Keep around 50 for Flow targets."
+                            onchange={handleFieldChange}
+                        ></lightning-input>
+                    </div>
+                    <div class="slds-col slds-size_1-of-2 slds-p-top_large">
+                        <lightning-input
+                            type="toggle"
+                            label="Active"
+                            checked={config.Active__c}
+                            message-toggle-active="Active"
+                            message-toggle-inactive="Inactive"
+                            onchange={handleActiveToggle}
+                        ></lightning-input>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ========================= Source ========================= -->
+            <div class="slds-section slds-is-open slds-m-top_medium">
+                <h3 class="slds-section__title slds-p-vertical_x-small">
+                    <span class="slds-truncate slds-p-horizontal_small">Source Query</span>
+                </h3>
+                <lightning-textarea
+                    label="Source SOQL Query"
+                    class="monospace"
+                    data-field="Source_SOQL_Query__c"
+                    value={config.Source_SOQL_Query__c}
+                    onchange={handleFieldChange}
+                ></lightning-textarea>
+                <div class="slds-m-top_x-small">
+                    <lightning-button
+                        label="Preview"
+                        icon-name="utility:preview"
+                        onclick={handlePreview}
+                        disabled={isPreviewLoading}
+                    ></lightning-button>
+                </div>
+
+                <template if:true={isPreviewLoading}>
+                    <lightning-spinner alternative-text="Previewing" size="small"></lightning-spinner>
+                </template>
+
+                <template if:true={hasPreview}>
+                    <div class="slds-m-top_small preview-scroll">
+                        <lightning-datatable
+                            key-field="_key"
+                            columns={previewColumns}
+                            data={previewRows}
+                            hide-checkbox-column
+                            column-widths-mode="auto"
+                        ></lightning-datatable>
+                    </div>
+                </template>
+            </div>
+
+            <!-- ========================= Target ========================= -->
+            <div class="slds-section slds-is-open slds-m-top_medium">
+                <h3 class="slds-section__title slds-p-vertical_x-small">
+                    <span class="slds-truncate slds-p-horizontal_small">Target Action</span>
+                </h3>
+                <lightning-radio-group
+                    label="Target Type"
+                    type="button"
+                    options={targetTypeOptions}
+                    value={config.Target_Type__c}
+                    onchange={handleTargetTypeChange}
+                ></lightning-radio-group>
+
+                <template if:true={isFlowTarget}>
+                    <lightning-combobox
+                        class="slds-m-top_x-small"
+                        label="Flow"
+                        placeholder="Select an active flow"
+                        options={flowOptions}
+                        value={config.Target_Action_Name__c}
+                        onchange={handleFlowSelect}
+                    ></lightning-combobox>
+                </template>
+
+                <template if:true={isApexTarget}>
+                    <lightning-input
+                        class="slds-m-top_x-small"
+                        label="Apex Class Name"
+                        value={config.Target_Action_Name__c}
+                        onchange={handleApexClassChange}
+                    ></lightning-input>
+                </template>
+
+                <div class="slds-m-top_x-small">
+                    <lightning-button
+                        label="Load Inputs"
+                        icon-name="utility:sync"
+                        onclick={handleLoadInputs}
+                        disabled={isInputsLoading}
+                    ></lightning-button>
+                </div>
+                <template if:true={isInputsLoading}>
+                    <lightning-spinner alternative-text="Loading inputs" size="small"></lightning-spinner>
+                </template>
+            </div>
+
+            <!-- ====================== Field Mappings ==================== -->
+            <div class="slds-section slds-is-open slds-m-top_medium">
+                <h3 class="slds-section__title slds-p-vertical_x-small">
+                    <span class="slds-truncate slds-p-horizontal_small">Field Mappings</span>
+                </h3>
+
+                <!-- Datalist of preview columns for the source-field hint -->
+                <datalist id="previewColumnList">
+                    <template for:each={previewColumnHints} for:item="col">
+                        <option key={col} value={col}></option>
+                    </template>
+                </datalist>
+
+                <table class="slds-table slds-table_bordered slds-table_cell-buffer">
+                    <thead>
+                        <tr class="slds-line-height_reset">
+                            <th scope="col"><div class="slds-truncate">Source Field / Literal</div></th>
+                            <th scope="col"><div class="slds-truncate">Target Parameter</div></th>
+                            <th scope="col"><div class="slds-truncate">Is Literal</div></th>
+                            <th scope="col" class="action-col"><div class="slds-truncate">&nbsp;</div></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <template for:each={mappings} for:item="row">
+                            <tr key={row.key}>
+                                <td>
+                                    <lightning-input
+                                        variant="label-hidden"
+                                        type="text"
+                                        list="previewColumnList"
+                                        data-key={row.key}
+                                        data-field="Source_Field_Name__c"
+                                        value={row.Source_Field_Name__c}
+                                        onchange={handleMappingChange}
+                                    ></lightning-input>
+                                </td>
+                                <td>
+                                    <lightning-combobox
+                                        variant="label-hidden"
+                                        placeholder="Select parameter"
+                                        options={targetParamOptions}
+                                        data-key={row.key}
+                                        data-field="Target_Parameter_Name__c"
+                                        value={row.Target_Parameter_Name__c}
+                                        onchange={handleMappingChange}
+                                    ></lightning-combobox>
+                                </td>
+                                <td class="slds-text-align_center">
+                                    <lightning-input
+                                        variant="label-hidden"
+                                        type="checkbox"
+                                        data-key={row.key}
+                                        data-field="Is_Literal__c"
+                                        checked={row.Is_Literal__c}
+                                        onchange={handleMappingChange}
+                                    ></lightning-input>
+                                </td>
+                                <td class="slds-text-align_center">
+                                    <lightning-button-icon
+                                        icon-name="utility:delete"
+                                        variant="border-filled"
+                                        alternative-text="Delete row"
+                                        data-key={row.key}
+                                        onclick={handleDeleteMapping}
+                                    ></lightning-button-icon>
+                                </td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+                <div class="slds-m-top_x-small">
+                    <lightning-button
+                        label="Add Row"
+                        icon-name="utility:add"
+                        onclick={handleAddMapping}
+                    ></lightning-button>
+                </div>
+            </div>
+
+            <!-- ========================= Schedule ======================= -->
+            <div class="slds-section slds-is-open slds-m-top_medium">
+                <h3 class="slds-section__title slds-p-vertical_x-small">
+                    <span class="slds-truncate slds-p-horizontal_small">Schedule</span>
+                </h3>
+                <lightning-radio-group
+                    label="Schedule Type"
+                    type="button"
+                    options={scheduleTypeOptions}
+                    value={config.Schedule_Type__c}
+                    onchange={handleScheduleTypeChange}
+                ></lightning-radio-group>
+
+                <template if:true={isScheduled}>
+                    <div class="slds-m-top_x-small">
+                        <lightning-input
+                            label="Cron Expression"
+                            data-field="Schedule_Cron__c"
+                            value={config.Schedule_Cron__c}
+                            onchange={handleFieldChange}
+                        ></lightning-input>
+                    </div>
+                    <div class="slds-m-top_x-small">
+                        <template for:each={cronPresets} for:item="preset">
+                            <lightning-button
+                                key={preset.label}
+                                class="slds-m-right_x-small"
+                                label={preset.label}
+                                data-cron={preset.cron}
+                                onclick={handleCronPreset}
+                            ></lightning-button>
+                        </template>
+                    </div>
+                    <div class="slds-m-top_small">
+                        <lightning-button
+                            class="slds-m-right_x-small"
+                            label="Save Schedule"
+                            variant="brand"
+                            onclick={handleSaveSchedule}
+                        ></lightning-button>
+                        <lightning-button
+                            label="Unschedule"
+                            variant="destructive-text"
+                            onclick={handleUnschedule}
+                            disabled={noScheduledJob}
+                        ></lightning-button>
+                    </div>
+                    <template if:true={hasScheduledJob}>
+                        <p class="slds-m-top_x-small slds-text-body_small">
+                            Current scheduled job: <strong>{config.Scheduled_Job_Id__c}</strong>
+                        </p>
+                    </template>
+                </template>
+            </div>
+
+            <!-- ==================== Last run summary ==================== -->
+            <template if:true={lastRunSummary}>
+                <p class="slds-m-top_medium slds-text-body_small">
+                    Last run: <strong>{lastRunSummary}</strong>
+                </p>
+            </template>
+        </div>
+
+        <!-- ========================= Footer ========================= -->
+        <div slot="footer" class="slds-grid slds-grid_align-end">
+            <lightning-button
+                class="slds-m-right_x-small"
+                label="Save"
+                variant="brand"
+                icon-name="utility:save"
+                onclick={handleSave}
+                disabled={isLoading}
+            ></lightning-button>
+            <lightning-button
+                label="Run Now"
+                variant="success"
+                icon-name="utility:play"
+                onclick={handleRunNow}
+                disabled={isLoading}
+            ></lightning-button>
+        </div>
+    </lightning-card>
+</template>

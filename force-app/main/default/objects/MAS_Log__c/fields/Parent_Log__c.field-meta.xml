@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Parent_Log__c</fullName>
+    <label>Parent Log</label>
+    <type>Lookup</type>
+    <referenceTo>MAS_Log__c</referenceTo>
+    <relationshipName>Child_Logs</relationshipName>
+    <relationshipLabel>Child Logs</relationshipLabel>
+    <deleteConstraint>SetNull</deleteConstraint>
+    <description>Links a per-batch detail log to its run summary log.</description>
+</CustomField>

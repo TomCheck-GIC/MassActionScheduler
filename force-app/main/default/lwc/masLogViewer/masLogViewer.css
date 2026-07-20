@@ -1,0 +1,4 @@
+.log-scroll {
+    max-height: 30rem;
+    overflow: auto;
+}

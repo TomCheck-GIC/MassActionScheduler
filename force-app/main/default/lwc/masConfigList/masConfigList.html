@@ -1,0 +1,29 @@
+<template>
+    <lightning-card title="Mass Action Configurations" icon-name="standard:settings">
+        <div slot="actions">
+            <lightning-button
+                label="View All"
+                icon-name="utility:list"
+                class="slds-m-right_x-small"
+                onclick={handleViewAll}
+            ></lightning-button>
+            <lightning-button
+                label="New Configuration"
+                variant="brand"
+                icon-name="utility:add"
+                onclick={handleNew}
+            ></lightning-button>
+        </div>
+
+        <div class="slds-p-horizontal_medium slds-p-vertical_small">
+            <p class="slds-text-body_regular">
+                Create a new Mass Action configuration, or open an existing
+                configuration record to edit its source query, target action,
+                field mappings, and schedule.
+            </p>
+            <p class="slds-text-body_small slds-text-color_weak slds-m-top_x-small">
+                Configurations are managed from their record pages.
+            </p>
+        </div>
+    </lightning-card>
+</template>

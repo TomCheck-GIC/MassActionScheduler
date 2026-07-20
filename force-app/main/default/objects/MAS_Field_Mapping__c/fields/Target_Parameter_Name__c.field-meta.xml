@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Target_Parameter_Name__c</fullName>
+    <label>Target Parameter Name</label>
+    <type>Text</type>
+    <length>255</length>
+    <description>API name of the Flow input variable or Apex invocable input parameter to receive the value.</description>
+</CustomField>

@@ -1,0 +1,15 @@
+.monospace textarea {
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    font-size: 0.85rem;
+}
+
+.preview-scroll {
+    max-height: 20rem;
+    overflow: auto;
+    border: 1px solid var(--slds-g-color-border-base-1, #dddbda);
+    border-radius: 0.25rem;
+}
+
+.action-col {
+    width: 4rem;
+}

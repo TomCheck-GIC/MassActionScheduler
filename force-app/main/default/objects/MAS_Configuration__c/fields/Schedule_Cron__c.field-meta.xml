@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Schedule_Cron__c</fullName>
+    <label>Schedule Cron</label>
+    <type>Text</type>
+    <length>100</length>
+    <description>Quartz cron expression used when Schedule Type is Scheduled (e.g. 0 0 6 * * ?).</description>
+</CustomField>

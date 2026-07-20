@@ -1,0 +1,29 @@
+<template>
+    <lightning-card title="Mass Action Logs" icon-name="standard:log_a_call">
+        <div class="slds-p-horizontal_small">
+            <template if:true={error}>
+                <div class="slds-text-color_error slds-p-around_small" role="alert">
+                    {error}
+                </div>
+            </template>
+
+            <template if:true={hasLogs}>
+                <div class="log-scroll">
+                    <lightning-datatable
+                        key-field="Id"
+                        columns={columns}
+                        data={logs}
+                        hide-checkbox-column
+                        column-widths-mode="auto"
+                    ></lightning-datatable>
+                </div>
+            </template>
+
+            <template if:false={hasLogs}>
+                <p class="slds-p-around_medium slds-text-color_weak">
+                    No log records found for this configuration.
+                </p>
+            </template>
+        </div>
+    </lightning-card>
+</template>
