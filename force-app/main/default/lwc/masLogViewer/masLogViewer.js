@@ -1,4 +1,5 @@
 import { LightningElement, api, wire } from 'lwc';
+import { NavigationMixin } from 'lightning/navigation';
 import getLogs from '@salesforce/apex/MAS_ConfigController.getLogs';
 
 // Datatable columns for the log grid.
@@ -25,10 +26,21 @@ const COLUMNS = [
         type: 'percent',
         fixedWidth: 110,
         typeAttributes: { maximumFractionDigits: 1 }
+    },
+    {
+        type: 'button-icon',
+        typeAttributes: {
+            iconName: 'utility:preview',
+            name: 'view_details',
+            title: 'View Details',
+            alternativeText: 'View Details',
+            variant: 'border-filled'
+        },
+        fixedWidth: 56
     }
 ];
 
-export default class MasLogViewer extends LightningElement {
+export default class MasLogViewer extends NavigationMixin(LightningElement) {
     /** MAS_Configuration__c record Id. */
     @api recordId;
 
@@ -57,5 +69,18 @@ export default class MasLogViewer extends LightningElement {
 
     get hasLogs() {
         return this.logs && this.logs.length > 0;
+    }
+
+    handleRowAction(event) {
+        if (event.detail.action.name === 'view_details') {
+            this[NavigationMixin.Navigate]({
+                type: 'standard__recordPage',
+                attributes: {
+                    recordId: event.detail.row.Id,
+                    objectApiName: 'MAS_Log__c',
+                    actionName: 'view'
+                }
+            });
+        }
     }
 }

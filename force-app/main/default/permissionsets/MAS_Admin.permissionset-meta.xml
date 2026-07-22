@@ -4,6 +4,11 @@
     <description>Full access to Mass Action Scheduler objects, fields, Apex, and tabs. Note: the assigned user also needs the standard "Manage Flow" (View Setup and Configuration) permission so FlowDefinitionView returns all active autolaunched flows in the wizard.</description>
     <hasActivationRequired>false</hasActivationRequired>
 
+    <applicationVisibilities>
+        <application>Mass_Action_Scheduler</application>
+        <visible>true</visible>
+    </applicationVisibilities>
+
     <classAccesses>
         <apexClass>MAS_BatchRunner</apexClass>
         <enabled>true</enabled>
@@ -201,12 +206,37 @@
         <editable>true</editable>
     </fieldPermissions>
 
+    <userPermissions>
+        <enabled>true</enabled>
+        <name>AuthorApex</name>
+    </userPermissions>
+    <userPermissions>
+        <enabled>true</enabled>
+        <name>ModifyMetadata</name>
+    </userPermissions>
+    <userPermissions>
+        <enabled>true</enabled>
+        <name>ViewRoles</name>
+    </userPermissions>
+    <userPermissions>
+        <enabled>true</enabled>
+        <name>ViewSetup</name>
+    </userPermissions>
+
     <tabSettings>
         <tab>MAS_Configuration__c</tab>
         <visibility>Visible</visibility>
     </tabSettings>
     <tabSettings>
         <tab>MAS_Log__c</tab>
+        <visibility>Visible</visibility>
+    </tabSettings>
+    <tabSettings>
+        <tab>All_Mass_Actions</tab>
+        <visibility>Visible</visibility>
+    </tabSettings>
+    <tabSettings>
+        <tab>MAS_Scheduled_Jobs_Page</tab>
         <visibility>Visible</visibility>
     </tabSettings>
 </PermissionSet>

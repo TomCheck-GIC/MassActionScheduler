@@ -24,6 +24,8 @@
                     <div class="slds-col slds-size_1-of-2">
                         <lightning-input
                             label="Name"
+                            class="validated-field"
+                            required
                             data-field="Name"
                             value={config.Name}
                             onchange={handleFieldChange}
@@ -49,6 +51,10 @@
                         <lightning-input
                             type="number"
                             label="Batch Size"
+                            class="validated-field"
+                            required
+                            min="1"
+                            max="200"
                             data-field="Batch_Size__c"
                             value={config.Batch_Size__c}
                             field-level-help="Keep around 50 for Flow targets."
@@ -131,12 +137,14 @@
                 </template>
 
                 <template if:true={isApexTarget}>
-                    <lightning-input
+                    <lightning-combobox
                         class="slds-m-top_x-small"
-                        label="Apex Class Name"
+                        label="Apex Class"
+                        placeholder="Select an Apex action"
+                        options={apexActionOptions}
                         value={config.Target_Action_Name__c}
-                        onchange={handleApexClassChange}
-                    ></lightning-input>
+                        onchange={handleApexActionSelect}
+                    ></lightning-combobox>
                 </template>
 
                 <div class="slds-m-top_x-small">
@@ -158,38 +166,57 @@
                     <span class="slds-truncate slds-p-horizontal_small">Field Mappings</span>
                 </h3>
 
-                <!-- Datalist of preview columns for the source-field hint -->
-                <datalist id="previewColumnList">
-                    <template for:each={previewColumnHints} for:item="col">
-                        <option key={col} value={col}></option>
-                    </template>
-                </datalist>
-
                 <table class="slds-table slds-table_bordered slds-table_cell-buffer">
                     <thead>
                         <tr class="slds-line-height_reset">
-                            <th scope="col"><div class="slds-truncate">Source Field / Literal</div></th>
+                            <th scope="col"><div class="slds-truncate">Value Type</div></th>
+                            <th scope="col"><div class="slds-truncate">Source Field / Value</div></th>
                             <th scope="col"><div class="slds-truncate">Target Parameter</div></th>
-                            <th scope="col"><div class="slds-truncate">Is Literal</div></th>
-                            <th scope="col" class="action-col"><div class="slds-truncate">&nbsp;</div></th>
+                            <th scope="col" class="action-col"><div class="slds-truncate"><span class="slds-assistive-text">Actions</span></div></th>
                         </tr>
                     </thead>
                     <tbody>
                         <template for:each={mappings} for:item="row">
                             <tr key={row.key}>
                                 <td>
-                                    <lightning-input
+                                    <lightning-combobox
+                                        label="Value Type"
                                         variant="label-hidden"
-                                        type="text"
-                                        list="previewColumnList"
+                                        options={valueTypeOptions}
                                         data-key={row.key}
-                                        data-field="Source_Field_Name__c"
-                                        value={row.Source_Field_Name__c}
-                                        onchange={handleMappingChange}
-                                    ></lightning-input>
+                                        value={row.valueType}
+                                        onchange={handleValueTypeChange}
+                                    ></lightning-combobox>
+                                </td>
+                                <td>
+                                    <template if:true={row.Is_Literal__c}>
+                                        <lightning-input
+                                            label="Literal Value"
+                                            variant="label-hidden"
+                                            type="text"
+                                            placeholder="Enter a literal value"
+                                            data-key={row.key}
+                                            data-field="Source_Field_Name__c"
+                                            value={row.Source_Field_Name__c}
+                                            onchange={handleMappingChange}
+                                        ></lightning-input>
+                                    </template>
+                                    <template if:false={row.Is_Literal__c}>
+                                        <lightning-combobox
+                                            label="Source Field"
+                                            variant="label-hidden"
+                                            placeholder="Select a field from the query"
+                                            options={sourceFieldOptions}
+                                            data-key={row.key}
+                                            data-field="Source_Field_Name__c"
+                                            value={row.Source_Field_Name__c}
+                                            onchange={handleMappingChange}
+                                        ></lightning-combobox>
+                                    </template>
                                 </td>
                                 <td>
                                     <lightning-combobox
+                                        label="Target Parameter"
                                         variant="label-hidden"
                                         placeholder="Select parameter"
                                         options={targetParamOptions}
@@ -200,20 +227,10 @@
                                     ></lightning-combobox>
                                 </td>
                                 <td class="slds-text-align_center">
-                                    <lightning-input
-                                        variant="label-hidden"
-                                        type="checkbox"
-                                        data-key={row.key}
-                                        data-field="Is_Literal__c"
-                                        checked={row.Is_Literal__c}
-                                        onchange={handleMappingChange}
-                                    ></lightning-input>
-                                </td>
-                                <td class="slds-text-align_center">
                                     <lightning-button-icon
                                         icon-name="utility:delete"
                                         variant="border-filled"
-                                        alternative-text="Delete row"
+                                        alternative-text={row.deleteLabel}
                                         data-key={row.key}
                                         onclick={handleDeleteMapping}
                                     ></lightning-button-icon>
@@ -246,24 +263,73 @@
 
                 <template if:true={isScheduled}>
                     <div class="slds-m-top_x-small">
-                        <lightning-input
-                            label="Cron Expression"
-                            data-field="Schedule_Cron__c"
-                            value={config.Schedule_Cron__c}
-                            onchange={handleFieldChange}
-                        ></lightning-input>
+                        <lightning-combobox
+                            label="Frequency"
+                            options={scheduleFrequencyOptions}
+                            value={scheduleBuilder.frequency}
+                            onchange={handleFrequencyChange}
+                        ></lightning-combobox>
                     </div>
-                    <div class="slds-m-top_x-small">
-                        <template for:each={cronPresets} for:item="preset">
-                            <lightning-button
-                                key={preset.label}
-                                class="slds-m-right_x-small"
-                                label={preset.label}
-                                data-cron={preset.cron}
-                                onclick={handleCronPreset}
-                            ></lightning-button>
-                        </template>
-                    </div>
+
+                    <template if:true={showSchedulePicker}>
+                        <div class="slds-m-top_x-small">
+                            <lightning-input
+                                type="time"
+                                label="Time"
+                                value={scheduleTimeValue}
+                                onchange={handleScheduleTimeChange}
+                            ></lightning-input>
+                        </div>
+                    </template>
+
+                    <template if:true={isWeeklyFrequency}>
+                        <div class="slds-m-top_x-small">
+                            <lightning-checkbox-group
+                                label="Days of Week"
+                                options={dayOfWeekOptions}
+                                value={scheduleBuilder.daysOfWeek}
+                                onchange={handleDaysOfWeekChange}
+                            ></lightning-checkbox-group>
+                        </div>
+                    </template>
+
+                    <template if:true={isMonthlyFrequency}>
+                        <div class="slds-m-top_x-small">
+                            <lightning-combobox
+                                label="Day of Month"
+                                options={dayOfMonthOptions}
+                                value={scheduleBuilder.dayOfMonth}
+                                onchange={handleDayOfMonthChange}
+                            ></lightning-combobox>
+                        </div>
+                    </template>
+
+                    <template if:true={isCustomFrequency}>
+                        <div class="slds-m-top_x-small">
+                            <lightning-input
+                                label="Cron Expression"
+                                data-field="Schedule_Cron__c"
+                                value={config.Schedule_Cron__c}
+                                onchange={handleFieldChange}
+                            ></lightning-input>
+                        </div>
+                        <div class="slds-m-top_x-small">
+                            <template for:each={cronPresets} for:item="preset">
+                                <lightning-button
+                                    key={preset.label}
+                                    class="slds-m-right_x-small"
+                                    label={preset.label}
+                                    data-cron={preset.cron}
+                                    onclick={handleCronPreset}
+                                ></lightning-button>
+                            </template>
+                        </div>
+                    </template>
+
+                    <p class="slds-m-top_x-small slds-text-body_small slds-text-color_weak">
+                        Effective cron expression: <code>{config.Schedule_Cron__c}</code>
+                    </p>
+
                     <div class="slds-m-top_small">
                         <lightning-button
                             class="slds-m-right_x-small"

@@ -2,18 +2,30 @@ import { LightningElement } from 'lwc';
 import { NavigationMixin } from 'lightning/navigation';
 
 /**
- * Simple entry-point component for the Mass Action Scheduler app.
- * Provides a "New Configuration" action that navigates to the standard
- * create page for MAS_Configuration__c. Individual configurations are
- * managed from their own record pages (via masConfigWizard).
+ * Entry-point component for the Mass Action Scheduler app. "New Configuration"
+ * embeds masConfigWizard inline (with no recordId, its supported "create" mode)
+ * rather than the bare-bones standard quick-create modal, so record creation
+ * gets the full editor (SOQL, target, mappings, schedule) up front.
  */
 export default class MasConfigList extends NavigationMixin(LightningElement) {
+    showWizard = false;
+
     handleNew() {
+        this.showWizard = true;
+    }
+
+    handleCancelNew() {
+        this.showWizard = false;
+    }
+
+    handleWizardSaved(event) {
+        this.showWizard = false;
         this[NavigationMixin.Navigate]({
-            type: 'standard__objectPage',
+            type: 'standard__recordPage',
             attributes: {
                 objectApiName: 'MAS_Configuration__c',
-                actionName: 'new'
+                recordId: event.detail.recordId,
+                actionName: 'view'
             }
         });
     }

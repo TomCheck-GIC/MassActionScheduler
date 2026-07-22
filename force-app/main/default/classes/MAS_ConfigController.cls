@@ -7,12 +7,22 @@
  *  - Source preview via Database.query
  *  - Run on demand via Database.executeBatch
  *  - Scheduling via System.schedule / System.abortJob
+ *
+ * Runs `without sharing` by design: the wizard is an admin tool (gated by the
+ * MAS_Admin permission set), and its previews, mappings, and run/schedule
+ * actions must reflect the configuration's data as an admin would see it,
+ * not the record-level sharing visibility of whichever user opens the wizard.
  */
-public with sharing class MAS_ConfigController {
+public without sharing class MAS_ConfigController {
     // ---------------------------------------------------------------------
     // DTOs
     // ---------------------------------------------------------------------
     public class FlowOption {
+        @AuraEnabled public String apiName;
+        @AuraEnabled public String label;
+    }
+
+    public class ApexActionOption {
         @AuraEnabled public String apiName;
         @AuraEnabled public String label;
     }
@@ -29,6 +39,17 @@ public with sharing class MAS_ConfigController {
         @AuraEnabled public List<String> columns = new List<String>();
         @AuraEnabled public List<Map<String, String>> rows = new List<Map<String, String>>();
         @AuraEnabled public Integer totalPreviewed = 0;
+    }
+
+    public class ScheduledJobInfo {
+        @AuraEnabled public Id configId;
+        @AuraEnabled public String configName;
+        @AuraEnabled public Id jobId;
+        @AuraEnabled public String jobName;
+        @AuraEnabled public String cronExpression;
+        @AuraEnabled public String scheduleDescription;
+        @AuraEnabled public Datetime nextFireTime;
+        @AuraEnabled public String state;
     }
 
     // ---------------------------------------------------------------------
@@ -55,6 +76,68 @@ public with sharing class MAS_ConfigController {
         }
     }
 
+    // This package's own control-plane invocable action - excluded from the
+    // Apex target picker so an admin can't accidentally configure a mass
+    // action whose target recursively launches another mass action.
+    private static final String RECURSIVE_LAUNCHER_CLASS_NAME = 'MAS_RunConfigInvocable';
+
+    /**
+     * Returns non-namespaced Apex classes that expose an @InvocableMethod, for
+     * use as Mass Action targets. There's no queryable metadata relationship
+     * for "classes with invocable methods" the way FlowDefinitionView exists
+     * for flows, so this scans class source text for the annotation instead.
+     * Requires the running user to have the "Author Apex" permission (needed
+     * to read ApexClass.Body) - granted by the MAS_Admin permission set.
+     */
+    @AuraEnabled(cacheable=true)
+    public static List<ApexActionOption> getInvocableApexClasses() {
+        try {
+            List<ApexActionOption> options = new List<ApexActionOption>();
+            for (ApexClass cls : [
+                SELECT Name, Body
+                FROM ApexClass
+                WHERE NamespacePrefix = null
+                ORDER BY Name
+                LIMIT 2000
+            ]) {
+                if (cls.Name == RECURSIVE_LAUNCHER_CLASS_NAME) {
+                    continue;
+                }
+                if (hasInvocableMethodAnnotation(cls.Body)) {
+                    ApexActionOption o = new ApexActionOption();
+                    o.apiName = cls.Name;
+                    o.label = cls.Name;
+                    options.add(o);
+                }
+            }
+            return options;
+        } catch (Exception e) {
+            throw new AuraHandledException('Unable to load Apex actions: ' + e.getMessage());
+        }
+    }
+
+    /**
+     * Checks class source text for a genuine @InvocableMethod annotation.
+     * A real annotation always starts its own line (with only leading
+     * whitespace before it) directly above a method declaration - unlike a
+     * plain substring search, this won't false-positive on the annotation
+     * name appearing inside a comment, doc block, or string literal
+     * elsewhere in the file (as it did against this very method's own code
+     * and its test's assertion messages during manual testing).
+     */
+    @TestVisible
+    private static Boolean hasInvocableMethodAnnotation(String body) {
+        if (String.isBlank(body)) {
+            return false;
+        }
+        for (String line : body.split('\n')) {
+            if (line.trim().toLowerCase().startsWith('@invocablemethod')) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /**
      * Returns the input parameters of a target Flow or Apex action, discovered
      * natively (no callout) via the Invocable.Action describe metadata.
@@ -66,7 +149,7 @@ public with sharing class MAS_ConfigController {
             if (String.isBlank(actionName)) {
                 return params;
             }
-            String actionType = (targetType == 'Apex') ? 'apex' : 'flow';
+            String actionType = MAS_Utils.toActionType(targetType);
             Invocable.Action action = Invocable.Action.createCustomAction(actionType, actionName);
             List<Invocable.Action.DescribeResult> describes = action.getDescribe();
             if (describes != null && !describes.isEmpty()) {
@@ -107,7 +190,14 @@ public with sharing class MAS_ConfigController {
             for (SObject record : records) {
                 Map<String, String> row = new Map<String, String>();
                 for (String col : result.columns) {
-                    Object val = getFieldValue(record, col);
+                    // Best-effort: an invalid column path should blank that one
+                    // preview cell, not fail the whole preview grid.
+                    Object val;
+                    try {
+                        val = MAS_Utils.getFieldValue(record, col);
+                    } catch (Exception e) {
+                        val = null;
+                    }
                     row.put(col, val == null ? '' : String.valueOf(val));
                 }
                 result.rows.add(row);
@@ -149,6 +239,60 @@ public with sharing class MAS_ConfigController {
         }
     }
 
+    /**
+     * Lists every currently-scheduled configuration alongside its live
+     * CronTrigger details, for the "Scheduled Jobs" home page / tab view.
+     * A configuration whose stored Scheduled_Job_Id__c no longer resolves to
+     * a CronTrigger (e.g. the job was aborted directly in Setup) is silently
+     * skipped rather than surfaced as broken - saveSchedule/unschedule are the
+     * only supported ways to manage that link.
+     */
+    @AuraEnabled(cacheable=true)
+    public static List<ScheduledJobInfo> getScheduledJobs() {
+        try {
+            List<ScheduledJobInfo> results = new List<ScheduledJobInfo>();
+            List<MAS_Configuration__c> scheduledConfigs = [
+                SELECT Id, Name, Scheduled_Job_Id__c
+                FROM MAS_Configuration__c
+                WHERE Schedule_Type__c = 'Scheduled' AND Scheduled_Job_Id__c != null
+                ORDER BY Name
+            ];
+            if (scheduledConfigs.isEmpty()) {
+                return results;
+            }
+
+            Set<Id> jobIds = new Set<Id>();
+            for (MAS_Configuration__c c : scheduledConfigs) {
+                jobIds.add(c.Scheduled_Job_Id__c);
+            }
+            Map<Id, CronTrigger> triggersById = new Map<Id, CronTrigger>(
+                [SELECT Id, CronJobDetail.Name, CronExpression, NextFireTime, State
+                 FROM CronTrigger
+                 WHERE Id IN :jobIds]
+            );
+
+            for (MAS_Configuration__c c : scheduledConfigs) {
+                CronTrigger ct = triggersById.get(c.Scheduled_Job_Id__c);
+                if (ct == null) {
+                    continue;
+                }
+                ScheduledJobInfo info = new ScheduledJobInfo();
+                info.configId = c.Id;
+                info.configName = c.Name;
+                info.jobId = ct.Id;
+                info.jobName = ct.CronJobDetail.Name;
+                info.cronExpression = ct.CronExpression;
+                info.scheduleDescription = MAS_Utils.describeCron(ct.CronExpression);
+                info.nextFireTime = ct.NextFireTime;
+                info.state = ct.State;
+                results.add(info);
+            }
+            return results;
+        } catch (Exception e) {
+            throw new AuraHandledException('Unable to load scheduled jobs: ' + e.getMessage());
+        }
+    }
+
     @AuraEnabled
     public static void unschedule(Id configId) {
         try {
@@ -160,6 +304,8 @@ public with sharing class MAS_ConfigController {
                     System.abortJob(c.Scheduled_Job_Id__c);
                 } catch (Exception ignored) {
                     // Job may already be gone; clearing the stored Id is enough.
+                    System.debug(LoggingLevel.WARN, 'MAS_ConfigController.unschedule: abortJob failed for '
+                        + c.Scheduled_Job_Id__c + ': ' + ignored.getMessage());
                 }
             }
             update new MAS_Configuration__c(Id = configId, Scheduled_Job_Id__c = null);
@@ -235,7 +381,7 @@ public with sharing class MAS_ConfigController {
                    Total_Records__c, Processed_Records__c, Failed_Records__c,
                    Batch_Success_Percentage__c, Timestamp__c
             FROM MAS_Log__c
-            WHERE Configuration__c = :configId
+            WHERE Configuration__c = :configId AND Parent_Log__c = null
             ORDER BY CreatedDate DESC
             LIMIT 50
         ];
@@ -302,26 +448,4 @@ public with sharing class MAS_ConfigController {
         return -1;
     }
 
-    @TestVisible
-    private static Object getFieldValue(SObject record, String fieldPath) {
-        if (String.isBlank(fieldPath) || record == null) {
-            return null;
-        }
-        try {
-            if (!fieldPath.contains('.')) {
-                return record.get(fieldPath);
-            }
-            List<String> parts = fieldPath.split('\\.');
-            SObject current = record;
-            for (Integer i = 0; i < parts.size() - 1; i++) {
-                current = current.getSObject(parts[i]);
-                if (current == null) {
-                    return null;
-                }
-            }
-            return current.get(parts[parts.size() - 1]);
-        } catch (Exception e) {
-            return null;
-        }
-    }
 }

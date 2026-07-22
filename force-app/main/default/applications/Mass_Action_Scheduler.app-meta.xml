@@ -6,6 +6,9 @@
     <uiType>Lightning</uiType>
     <formFactors>Large</formFactors>
     <isNavAutoTempTabsDisabled>false</isNavAutoTempTabsDisabled>
+    <defaultLandingTab>All_Mass_Actions</defaultLandingTab>
+    <tabs>All_Mass_Actions</tabs>
+    <tabs>MAS_Scheduled_Jobs_Page</tabs>
     <tabs>MAS_Configuration__c</tabs>
     <tabs>MAS_Log__c</tabs>
 </CustomApplication>

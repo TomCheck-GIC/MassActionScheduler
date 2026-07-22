@@ -1,10 +1,11 @@
-import { LightningElement, api, track } from 'lwc';
+import { LightningElement, api, track, wire } from 'lwc';
 import { ShowToastEvent } from 'lightning/platformShowToastEvent';
 
 // Apex controller methods (exact shapes provided by the package controller)
 import getConfig from '@salesforce/apex/MAS_ConfigController.getConfig';
 import getMappings from '@salesforce/apex/MAS_ConfigController.getMappings';
 import getActiveFlows from '@salesforce/apex/MAS_ConfigController.getActiveFlows';
+import getInvocableApexClasses from '@salesforce/apex/MAS_ConfigController.getInvocableApexClasses';
 import getActionInputs from '@salesforce/apex/MAS_ConfigController.getActionInputs';
 import previewSource from '@salesforce/apex/MAS_ConfigController.previewSource';
 import runNow from '@salesforce/apex/MAS_ConfigController.runNow';
@@ -21,6 +22,75 @@ const TARGET_APEX = 'Apex';
 const SCHEDULE_MANUAL = 'Manual';
 const SCHEDULE_SCHEDULED = 'Scheduled';
 
+// Schedule frequency options (drive the friendly cron builder)
+const FREQUENCY_HOURLY = 'hourly';
+const FREQUENCY_DAILY = 'daily';
+const FREQUENCY_WEEKLY = 'weekly';
+const FREQUENCY_MONTHLY = 'monthly';
+const FREQUENCY_CUSTOM = 'custom';
+
+const DAY_OF_WEEK_OPTIONS = [
+    { label: 'Mon', value: 'MON' },
+    { label: 'Tue', value: 'TUE' },
+    { label: 'Wed', value: 'WED' },
+    { label: 'Thu', value: 'THU' },
+    { label: 'Fri', value: 'FRI' },
+    { label: 'Sat', value: 'SAT' },
+    { label: 'Sun', value: 'SUN' }
+];
+
+const DAY_OF_MONTH_OPTIONS = [
+    ...Array.from({ length: 28 }, (_, i) => ({ label: String(i + 1), value: String(i + 1) })),
+    { label: 'Last day of month', value: 'L' }
+];
+
+const VALUE_TYPE_FIELD = 'field';
+const VALUE_TYPE_LITERAL = 'literal';
+
+const VALUE_TYPE_OPTIONS = [
+    { label: 'Field from Query', value: VALUE_TYPE_FIELD },
+    { label: 'Literal Value', value: VALUE_TYPE_LITERAL }
+];
+
+/**
+ * Extracts the top-level field list out of a SOQL SELECT clause, e.g.
+ * "SELECT Id, Name, Account.Name, (SELECT Id FROM Contacts) FROM Contact"
+ * -> ['Id', 'Name', 'Account.Name']. Child subqueries are parenthesized and
+ * return record lists rather than scalar values, so they're excluded.
+ * Comma-splitting tracks paren depth so subquery/function-call commas
+ * (e.g. inside a child relationship query) don't split the field list.
+ */
+function parseSoqlSelectFields(soql) {
+    if (!soql) {
+        return [];
+    }
+    const match = /^\s*select\s+([\s\S]*?)\s+from\s+/i.exec(soql);
+    if (!match) {
+        return [];
+    }
+    const fieldsPart = match[1];
+    const fields = [];
+    let depth = 0;
+    let current = '';
+    for (const ch of fieldsPart) {
+        if (ch === '(') {
+            depth += 1;
+        } else if (ch === ')') {
+            depth -= 1;
+        }
+        if (ch === ',' && depth === 0) {
+            fields.push(current.trim());
+            current = '';
+        } else {
+            current += ch;
+        }
+    }
+    if (current.trim()) {
+        fields.push(current.trim());
+    }
+    return fields.filter((f) => f && !f.startsWith('(')).map((f) => f.replace(/\s+/g, ' '));
+}
+
 export default class MasConfigWizard extends LightningElement {
     /** MAS_Configuration__c record Id (populated on a Record Page). */
     @api recordId;
@@ -29,13 +99,30 @@ export default class MasConfigWizard extends LightningElement {
     @track config = {}; // mutable copy of the MAS_Configuration__c sObject
     @track mappings = []; // working list of field-mapping rows
     @track flowOptions = []; // combobox options built from getActiveFlows
+    @track apexActionOptions = []; // combobox options built from getInvocableApexClasses
     @track targetParams = []; // params returned by getActionInputs
     @track previewColumns = []; // datatable columns for the SOQL preview
     @track previewRows = []; // datatable rows for the SOQL preview
 
-    isLoading = false;
+    /** Friendly schedule builder state; Schedule_Cron__c remains the persisted source of truth. */
+    @track scheduleBuilder = {
+        frequency: FREQUENCY_DAILY,
+        hour: 6,
+        minute: 0,
+        daysOfWeek: ['MON'],
+        dayOfMonth: '1'
+    };
+
+    isLoading = true;
     isPreviewLoading = false;
     isInputsLoading = false;
+
+    // Tracks whether each initial @wire load has resolved (data or error),
+    // so isLoading can drop once all four have reported in.
+    _flowsReady = false;
+    _apexActionsReady = false;
+    _configReady = false;
+    _mappingsReady = false;
 
     // Radio option definitions ----------------------------------------------
     targetTypeOptions = [
@@ -48,6 +135,17 @@ export default class MasConfigWizard extends LightningElement {
         { label: 'Scheduled', value: SCHEDULE_SCHEDULED }
     ];
 
+    scheduleFrequencyOptions = [
+        { label: 'Hourly', value: FREQUENCY_HOURLY },
+        { label: 'Daily', value: FREQUENCY_DAILY },
+        { label: 'Weekly', value: FREQUENCY_WEEKLY },
+        { label: 'Monthly', value: FREQUENCY_MONTHLY },
+        { label: 'Custom (advanced)', value: FREQUENCY_CUSTOM }
+    ];
+
+    dayOfWeekOptions = DAY_OF_WEEK_OPTIONS;
+    dayOfMonthOptions = DAY_OF_MONTH_OPTIONS;
+
     cronPresets = [
         { label: 'Every hour', cron: '0 0 * * * ?' },
         { label: 'Daily 6am', cron: '0 0 6 * * ?' },
@@ -56,40 +154,75 @@ export default class MasConfigWizard extends LightningElement {
 
     // ----- Lifecycle -------------------------------------------------------
     connectedCallback() {
-        this.loadEverything();
+        if (!this.recordId) {
+            // New record: nothing to wire in, so set defaults synchronously.
+            // (@wire(getConfig)/@wire(getMappings) below never fire without a recordId.)
+            this.config = {
+                Active__c: true,
+                Batch_Size__c: 50,
+                Target_Type__c: TARGET_FLOW,
+                Schedule_Type__c: SCHEDULE_MANUAL
+            };
+            this.applyCronToBuilder();
+            this._configReady = true;
+            this._mappingsReady = true;
+            this.checkInitialLoadComplete();
+        }
     }
 
-    async loadEverything() {
-        this.isLoading = true;
-        try {
-            // Active flows do not depend on the record, always load them.
-            this.buildFlowOptions(await getActiveFlows());
+    // ----- Wired reads (reactive, read-only) --------------------------------
+    @wire(getActiveFlows)
+    wiredFlows({ data, error }) {
+        if (data) {
+            this.buildFlowOptions(data);
+        } else if (error) {
+            this.showError('Failed to load flows', error);
+        }
+        this._flowsReady = true;
+        this.checkInitialLoadComplete();
+    }
 
-            if (this.recordId) {
-                const [cfg, maps] = await Promise.all([
-                    getConfig({ configId: this.recordId }),
-                    getMappings({ configId: this.recordId })
-                ]);
-                // Copy sObject into a mutable plain object.
-                this.config = cfg ? { ...cfg } : {};
-                this.mappings = (maps || []).map((m, i) => this.toMappingRow(m, i));
+    @wire(getInvocableApexClasses)
+    wiredApexActions({ data, error }) {
+        if (data) {
+            this.buildApexActionOptions(data);
+        } else if (error) {
+            this.showError('Failed to load Apex actions', error);
+        }
+        this._apexActionsReady = true;
+        this.checkInitialLoadComplete();
+    }
 
-                // If a target action is already configured, load its inputs.
-                if (this.config.Target_Type__c && this.config.Target_Action_Name__c) {
-                    await this.loadActionInputs();
-                }
-            } else {
-                // New record defaults.
-                this.config = {
-                    Active__c: true,
-                    Batch_Size__c: 50,
-                    Target_Type__c: TARGET_FLOW,
-                    Schedule_Type__c: SCHEDULE_MANUAL
-                };
+    @wire(getConfig, { configId: '$recordId' })
+    wiredConfig({ data, error }) {
+        if (data) {
+            // Copy sObject into a mutable plain object; the wizard edits this
+            // locally, it does not mutate the wired value directly.
+            this.config = { ...data };
+            this.applyCronToBuilder();
+            if (this.config.Target_Type__c && this.config.Target_Action_Name__c) {
+                this.loadActionInputs();
             }
-        } catch (error) {
+        } else if (error) {
             this.showError('Failed to load configuration', error);
-        } finally {
+        }
+        this._configReady = true;
+        this.checkInitialLoadComplete();
+    }
+
+    @wire(getMappings, { configId: '$recordId' })
+    wiredMappings({ data, error }) {
+        if (data) {
+            this.mappings = this.relabelMappings(data.map((m, i) => this.toMappingRow(m, i)));
+        } else if (error) {
+            this.showError('Failed to load field mappings', error);
+        }
+        this._mappingsReady = true;
+        this.checkInitialLoadComplete();
+    }
+
+    checkInitialLoadComplete() {
+        if (this._flowsReady && this._apexActionsReady && this._configReady && this._mappingsReady) {
             this.isLoading = false;
         }
     }
@@ -102,14 +235,28 @@ export default class MasConfigWizard extends LightningElement {
         }));
     }
 
+    buildApexActionOptions(classes) {
+        this.apexActionOptions = (classes || []).map((c) => ({
+            label: c.label,
+            value: c.apiName
+        }));
+    }
+
     toMappingRow(m, index) {
+        const isLiteral = !!m.Is_Literal__c;
         return {
             key: m.Id || `new-${index}-${Date.now()}`,
             Id: m.Id,
             Source_Field_Name__c: m.Source_Field_Name__c,
             Target_Parameter_Name__c: m.Target_Parameter_Name__c,
-            Is_Literal__c: !!m.Is_Literal__c
+            Is_Literal__c: isLiteral,
+            valueType: isLiteral ? VALUE_TYPE_LITERAL : VALUE_TYPE_FIELD
         };
+    }
+
+    /** Recomputes each row's screen-reader delete label to match its current position. */
+    relabelMappings(rows) {
+        return rows.map((row, i) => ({ ...row, deleteLabel: `Delete mapping row ${i + 1}` }));
     }
 
     // ----- Computed getters ------------------------------------------------
@@ -145,9 +292,56 @@ export default class MasConfigWizard extends LightningElement {
         }));
     }
 
-    /** Preview column API names, exposed for the source-field datalist hint. */
+    /** Preview column API names, used as a fallback source-field hint. */
     get previewColumnHints() {
         return this.previewColumns.map((c) => c.fieldName);
+    }
+
+    /** Value Type options (Field from Query vs. Literal Value) for each mapping row. */
+    get valueTypeOptions() {
+        return VALUE_TYPE_OPTIONS;
+    }
+
+    /**
+     * Combobox options for the Source Field cell: fields parsed live out of the
+     * SELECT clause of Source_SOQL_Query__c, falling back to/merging with any
+     * columns already returned by a Preview run (covers queries the parser can't
+     * fully handle, e.g. TYPEOF or multi-clause WHERE with an unmatched FROM).
+     */
+    get sourceFieldOptions() {
+        const parsed = parseSoqlSelectFields(this.config.Source_SOQL_Query__c);
+        const seen = new Set();
+        const merged = [];
+        [...parsed, ...this.previewColumnHints].forEach((f) => {
+            if (f && !seen.has(f)) {
+                seen.add(f);
+                merged.push(f);
+            }
+        });
+        return merged.map((f) => ({ label: f, value: f }));
+    }
+
+    get showSchedulePicker() {
+        return this.scheduleBuilder.frequency !== FREQUENCY_HOURLY
+            && this.scheduleBuilder.frequency !== FREQUENCY_CUSTOM;
+    }
+
+    get isWeeklyFrequency() {
+        return this.scheduleBuilder.frequency === FREQUENCY_WEEKLY;
+    }
+
+    get isMonthlyFrequency() {
+        return this.scheduleBuilder.frequency === FREQUENCY_MONTHLY;
+    }
+
+    get isCustomFrequency() {
+        return this.scheduleBuilder.frequency === FREQUENCY_CUSTOM;
+    }
+
+    /** HH:MM:SS value for lightning-input type="time", derived from the builder's hour/minute. */
+    get scheduleTimeValue() {
+        const pad = (n) => String(n).padStart(2, '0');
+        return `${pad(this.scheduleBuilder.hour)}:${pad(this.scheduleBuilder.minute)}:00.000`;
     }
 
     get lastRunSummary() {
@@ -189,8 +383,9 @@ export default class MasConfigWizard extends LightningElement {
         this.loadActionInputs();
     }
 
-    handleApexClassChange(event) {
-        this.config = { ...this.config, Target_Action_Name__c: event.target.value };
+    handleApexActionSelect(event) {
+        this.config = { ...this.config, Target_Action_Name__c: event.detail.value };
+        this.loadActionInputs();
     }
 
     handleScheduleTypeChange(event) {
@@ -255,37 +450,135 @@ export default class MasConfigWizard extends LightningElement {
 
     // ----- Field mappings grid --------------------------------------------
     handleAddMapping() {
-        this.mappings = [
+        this.mappings = this.relabelMappings([
             ...this.mappings,
             {
                 key: `new-${this.mappings.length}-${Date.now()}`,
                 Id: null,
                 Source_Field_Name__c: '',
                 Target_Parameter_Name__c: '',
-                Is_Literal__c: false
+                Is_Literal__c: false,
+                valueType: VALUE_TYPE_FIELD
             }
-        ];
+        ]);
     }
 
     handleDeleteMapping(event) {
         const key = event.target.dataset.key;
-        this.mappings = this.mappings.filter((m) => m.key !== key);
+        this.mappings = this.relabelMappings(this.mappings.filter((m) => m.key !== key));
+    }
+
+    /** Toggles a row between picking a field off the query and typing a literal value. */
+    handleValueTypeChange(event) {
+        const key = event.target.dataset.key;
+        const valueType = event.detail.value;
+        this.mappings = this.mappings.map((m) =>
+            m.key === key
+                ? { ...m, valueType, Is_Literal__c: valueType === VALUE_TYPE_LITERAL, Source_Field_Name__c: '' }
+                : m
+        );
     }
 
     handleMappingChange(event) {
         const key = event.target.dataset.key;
         const field = event.target.dataset.field;
-        let value = event.target.value;
-        if (event.target.type === 'checkbox') {
-            value = event.target.checked;
-        }
-        // combobox uses event.detail.value
-        if (event.detail && event.detail.value !== undefined && field === 'Target_Parameter_Name__c') {
-            value = event.detail.value;
-        }
+        // lightning-combobox reports its value via event.detail; lightning-input via event.target.
+        const value = event.detail && event.detail.value !== undefined ? event.detail.value : event.target.value;
         this.mappings = this.mappings.map((m) =>
             m.key === key ? { ...m, [field]: value } : m
         );
+    }
+
+    // ----- Schedule builder --------------------------------------------------
+    /** Builds a Quartz cron expression from the current friendly builder state. */
+    buildCronFromBuilder() {
+        const { frequency, hour, minute, daysOfWeek, dayOfMonth } = this.scheduleBuilder;
+        const h = Number.isInteger(hour) ? hour : 0;
+        const m = Number.isInteger(minute) ? minute : 0;
+        switch (frequency) {
+            case FREQUENCY_HOURLY:
+                return '0 0 * * * ?';
+            case FREQUENCY_DAILY:
+                return `0 ${m} ${h} * * ?`;
+            case FREQUENCY_WEEKLY: {
+                const days = daysOfWeek && daysOfWeek.length ? daysOfWeek.join(',') : 'MON';
+                return `0 ${m} ${h} ? * ${days}`;
+            }
+            case FREQUENCY_MONTHLY:
+                return `0 ${m} ${h} ${dayOfMonth || '1'} * ?`;
+            default:
+                return this.config.Schedule_Cron__c;
+        }
+    }
+
+    /** Parses a Quartz cron expression back into friendly builder state, falling back to Custom. */
+    parseCronToBuilder(cron) {
+        const defaults = {
+            frequency: FREQUENCY_DAILY,
+            hour: 6,
+            minute: 0,
+            daysOfWeek: ['MON'],
+            dayOfMonth: '1'
+        };
+        if (!cron) {
+            return defaults;
+        }
+        const parts = cron.trim().split(/\s+/);
+        if (parts.length !== 6) {
+            return { ...defaults, frequency: FREQUENCY_CUSTOM };
+        }
+        const [sec, min, hr, dom, mon, dow] = parts;
+        const isNum = (v) => /^\d+$/.test(v);
+
+        if (sec === '0' && min === '0' && hr === '*' && dom === '*' && mon === '*' && dow === '?') {
+            return { ...defaults, frequency: FREQUENCY_HOURLY };
+        }
+        if (sec === '0' && isNum(min) && isNum(hr) && dom === '*' && mon === '*' && dow === '?') {
+            return { ...defaults, frequency: FREQUENCY_DAILY, hour: Number(hr), minute: Number(min) };
+        }
+        if (sec === '0' && isNum(min) && isNum(hr) && dom === '?' && mon === '*' && dow !== '?') {
+            const days = dow.split(',').map((d) => d.trim().toUpperCase());
+            return { ...defaults, frequency: FREQUENCY_WEEKLY, hour: Number(hr), minute: Number(min), daysOfWeek: days };
+        }
+        if (sec === '0' && isNum(min) && isNum(hr) && (dom === 'L' || isNum(dom)) && mon === '*' && dow === '?') {
+            return { ...defaults, frequency: FREQUENCY_MONTHLY, hour: Number(hr), minute: Number(min), dayOfMonth: dom };
+        }
+        return { ...defaults, frequency: FREQUENCY_CUSTOM };
+    }
+
+    /** Re-derives builder state from the loaded record's cron, then normalizes the cron to match. */
+    applyCronToBuilder() {
+        this.scheduleBuilder = this.parseCronToBuilder(this.config.Schedule_Cron__c);
+        this.recomputeCron();
+    }
+
+    /** Regenerates Schedule_Cron__c from the builder, unless the user is in Custom (raw) mode. */
+    recomputeCron() {
+        if (this.scheduleBuilder.frequency === FREQUENCY_CUSTOM) {
+            return;
+        }
+        this.config = { ...this.config, Schedule_Cron__c: this.buildCronFromBuilder() };
+    }
+
+    handleFrequencyChange(event) {
+        this.scheduleBuilder = { ...this.scheduleBuilder, frequency: event.detail.value };
+        this.recomputeCron();
+    }
+
+    handleScheduleTimeChange(event) {
+        const [hh, mm] = event.target.value.split(':');
+        this.scheduleBuilder = { ...this.scheduleBuilder, hour: Number(hh), minute: Number(mm) };
+        this.recomputeCron();
+    }
+
+    handleDaysOfWeekChange(event) {
+        this.scheduleBuilder = { ...this.scheduleBuilder, daysOfWeek: event.detail.value };
+        this.recomputeCron();
+    }
+
+    handleDayOfMonthChange(event) {
+        this.scheduleBuilder = { ...this.scheduleBuilder, dayOfMonth: event.detail.value };
+        this.recomputeCron();
     }
 
     // ----- Schedule actions ------------------------------------------------
@@ -335,7 +628,22 @@ export default class MasConfigWizard extends LightningElement {
     }
 
     // ----- Footer actions --------------------------------------------------
+    /** Reports validity on required/bounded fields; returns false and stops the save if any fail. */
+    isFormValid() {
+        const fields = this.template.querySelectorAll('.validated-field');
+        let allValid = true;
+        fields.forEach((field) => {
+            if (!field.reportValidity()) {
+                allValid = false;
+            }
+        });
+        return allValid;
+    }
+
     async handleSave() {
+        if (!this.isFormValid()) {
+            return;
+        }
         this.isLoading = true;
         try {
             // Build a plain object matching MAS_Configuration__c field API names.

@@ -23,7 +23,7 @@ private class MAS_SchedulerTest {
         new MAS_Scheduler(cfg.Id).execute(null);
         Test.stopTest();
 
-        System.assert(!MAS_SampleAction.capturedNames.isEmpty(), 'Scheduler launched the batch and target ran');
+        Assert.isTrue(!MAS_SampleAction.capturedNames.isEmpty(), 'Scheduler launched the batch and target ran');
     }
 
     @IsTest
@@ -45,6 +45,6 @@ private class MAS_SchedulerTest {
         new MAS_Scheduler(cfg.Id).execute(null);
         Test.stopTest();
 
-        System.assert(MAS_SampleAction.capturedNames.isEmpty(), 'Inactive config should not run');
+        Assert.isTrue(MAS_SampleAction.capturedNames.isEmpty(), 'Inactive config should not run');
     }
 }

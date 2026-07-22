@@ -2,8 +2,8 @@
 <LightningComponentBundle xmlns="http://soap.sforce.com/2006/04/metadata">
     <apiVersion>67.0</apiVersion>
     <isExposed>true</isExposed>
-    <masterLabel>MAS Configuration List</masterLabel>
-    <description>Entry point to create and open Mass Action Scheduler configurations.</description>
+    <masterLabel>MAS Scheduled Jobs List</masterLabel>
+    <description>Lists every Mass Action configuration that is currently scheduled, with its job name and a plain-English run schedule.</description>
     <targets>
         <target>lightning__AppPage</target>
         <target>lightning__HomePage</target>

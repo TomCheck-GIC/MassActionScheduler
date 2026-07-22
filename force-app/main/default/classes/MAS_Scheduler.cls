@@ -1,8 +1,12 @@
 /**
  * Schedulable wrapper that launches a MAS_BatchRunner for a configuration.
  * Registered via System.schedule from MAS_ConfigController.saveSchedule.
+ *
+ * Runs `without sharing`: a scheduled run must process the configuration's full
+ * result set as an admin defined it, independent of the running user context
+ * the scheduled job executes under.
  */
-public with sharing class MAS_Scheduler implements Schedulable {
+public without sharing class MAS_Scheduler implements Schedulable {
     private final Id configId;
 
     public MAS_Scheduler(Id configId) {

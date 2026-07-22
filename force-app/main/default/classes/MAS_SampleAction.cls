@@ -4,7 +4,6 @@
  * It records the values it receives so tests can assert the mapping worked.
  */
 public with sharing class MAS_SampleAction {
-    @TestVisible
     public static List<String> capturedNames = new List<String>();
 
     public class Input {

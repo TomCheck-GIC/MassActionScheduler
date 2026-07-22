@@ -1,0 +1,39 @@
+<template>
+    <lightning-card title="Scheduled Mass Actions" icon-name="standard:event">
+        <div slot="actions">
+            <lightning-button-icon
+                icon-name="utility:refresh"
+                alternative-text="Refresh"
+                title="Refresh"
+                onclick={handleRefresh}
+            ></lightning-button-icon>
+        </div>
+
+        <template if:true={isLoading}>
+            <lightning-spinner alternative-text="Loading" size="small"></lightning-spinner>
+        </template>
+
+        <template if:true={error}>
+            <div class="slds-p-horizontal_medium slds-p-vertical_small slds-text-color_error">
+                {error}
+            </div>
+        </template>
+
+        <template if:false={isLoading}>
+            <template if:true={hasJobs}>
+                <lightning-datatable
+                    key-field="jobId"
+                    columns={columns}
+                    data={jobs}
+                    hide-checkbox-column
+                ></lightning-datatable>
+            </template>
+            <template if:false={hasJobs}>
+                <div class="slds-p-horizontal_medium slds-p-vertical_small slds-text-color_weak">
+                    No Mass Action configurations are currently scheduled. Open a configuration's
+                    record page and set a schedule under Configuration &gt; Schedule.
+                </div>
+            </template>
+        </template>
+    </lightning-card>
+</template>

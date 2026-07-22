@@ -8,8 +8,13 @@
  *
  * Per-record input parameters are built from MAS_Field_Mapping__c rows. Results
  * are captured per record (Invocable.Action.Result) and summarized into MAS_Log__c.
+ *
+ * Runs `without sharing` by design: a mass action configured by an admin must
+ * process every record its source query returns, regardless of the record-level
+ * sharing visibility of whichever user's automation happened to launch the run
+ * (scheduled job, on-demand click, or an invocable action called from a Flow).
  */
-public with sharing class MAS_BatchRunner implements Database.Batchable<SObject>, Database.Stateful {
+public without sharing class MAS_BatchRunner implements Database.Batchable<SObject>, Database.Stateful {
     private final Id configId;
     private MAS_Configuration__c config;
     private List<MAS_Field_Mapping__c> mappings;
@@ -18,6 +23,7 @@ public with sharing class MAS_BatchRunner implements Database.Batchable<SObject>
     private Integer failedRecords = 0;
     private Integer totalBatches = 0;
     private Integer failedBatches = 0;
+    private Map<String, String> paramTypesByName;
 
     public MAS_BatchRunner(Id configId) {
         this.configId = configId;
@@ -35,16 +41,22 @@ public with sharing class MAS_BatchRunner implements Database.Batchable<SObject>
             FROM MAS_Field_Mapping__c
             WHERE Configuration__c = :configId
         ];
-        update new MAS_Configuration__c(Id = configId, Last_Run_Status__c = 'Running');
+        update new MAS_Configuration__c(Id = configId, Last_Run_Status__c = MAS_Utils.STATUS_RUNNING);
         return Database.getQueryLocator(config.Source_SOQL_Query__c);
     }
 
     public void execute(Database.BatchableContext bc, List<SObject> scope) {
         totalBatches++;
         Integer batchFailed = 0;
-        List<String> errorLines = new List<String>();
+        List<String> recordLines = new List<String>();
 
         try {
+            String actionType = MAS_Utils.toActionType(config.Target_Type__c);
+            Invocable.Action action = Invocable.Action.createCustomAction(actionType, config.Target_Action_Name__c);
+            if (paramTypesByName == null) {
+                paramTypesByName = describeParamTypes(action);
+            }
+
             // Build one invocation per record, then invoke the action once.
             List<Map<String, Object>> invocations = new List<Map<String, Object>>();
             for (SObject record : scope) {
@@ -52,14 +64,12 @@ public with sharing class MAS_BatchRunner implements Database.Batchable<SObject>
                 for (MAS_Field_Mapping__c m : mappings) {
                     Object value = (m.Is_Literal__c == true)
                         ? (Object) m.Source_Field_Name__c
-                        : getFieldValue(record, m.Source_Field_Name__c);
-                    params.put(m.Target_Parameter_Name__c, value);
+                        : MAS_Utils.getFieldValue(record, m.Source_Field_Name__c);
+                    params.put(m.Target_Parameter_Name__c, coerceForTarget(value, paramTypesByName.get(m.Target_Parameter_Name__c)));
                 }
                 invocations.add(params);
             }
 
-            String actionType = (config.Target_Type__c == 'Apex') ? 'apex' : 'flow';
-            Invocable.Action action = Invocable.Action.createCustomAction(actionType, config.Target_Action_Name__c);
             action.setInvocations(invocations);
 
             // invoke() after building params (and before any DML below) so a target
@@ -73,27 +83,34 @@ public with sharing class MAS_BatchRunner implements Database.Batchable<SObject>
                 } else {
                     failedRecords++;
                     batchFailed++;
-                    errorLines.add(describeFailure(scope, i, r));
                 }
+                recordLines.add(describeRecord(scope, i, r));
             }
         } catch (Exception e) {
             // Whole-chunk failure (e.g. invalid action name, malformed params).
             failedRecords += scope.size();
             batchFailed = scope.size();
-            errorLines.add('Batch failed: ' + e.getMessage());
+            for (SObject record : scope) {
+                recordLines.add(record.Id + ': FAILED - Batch failed: ' + e.getMessage());
+            }
         }
 
-        if (batchFailed > 0) {
-            failedBatches++;
-            insert new MAS_Log__c(
-                Configuration__c = configId,
-                Message_Type__c = 'Error',
-                Message__c = batchFailed + ' of ' + scope.size() + ' record(s) failed in this batch',
-                Long_Message__c = String.join(errorLines, '\n').abbreviate(32768),
-                Job_Id__c = bc.getJobId(),
-                Timestamp__c = System.now()
-            );
-        }
+        failedBatches += (batchFailed > 0) ? 1 : 0;
+        Integer batchProcessed = scope.size() - batchFailed;
+        insert new MAS_Log__c(
+            Configuration__c = configId,
+            Message_Type__c = (batchFailed > 0) ? MAS_Utils.LOG_TYPE_ERROR : MAS_Utils.LOG_TYPE_SUCCESS,
+            Message__c = batchProcessed + ' of ' + scope.size() + ' record(s) processed in this batch',
+            Long_Message__c = String.join(recordLines, '\n').abbreviate(32768),
+            Job_Id__c = bc.getJobId(),
+            Total_Records__c = scope.size(),
+            Processed_Records__c = batchProcessed,
+            Failed_Records__c = batchFailed,
+            Batch_Success_Percentage__c = (scope.size() > 0)
+                ? (((Decimal) batchProcessed / scope.size()) * 100).setScale(2)
+                : 100,
+            Timestamp__c = System.now()
+        );
     }
 
     public void finish(Database.BatchableContext bc) {
@@ -103,12 +120,12 @@ public with sharing class MAS_BatchRunner implements Database.Batchable<SObject>
             ? (((Decimal) processedRecords / totalRecords) * 100).setScale(2)
             : 100;
         String status = (failedRecords == 0)
-            ? 'Success'
-            : (processedRecords > 0 ? 'Completed with Errors' : 'Failed');
+            ? MAS_Utils.STATUS_SUCCESS
+            : (processedRecords > 0 ? MAS_Utils.STATUS_COMPLETED_WITH_ERRORS : MAS_Utils.STATUS_FAILED);
 
         MAS_Log__c summary = new MAS_Log__c(
             Configuration__c = configId,
-            Message_Type__c = (failedRecords == 0) ? 'Success' : 'Error',
+            Message_Type__c = (failedRecords == 0) ? MAS_Utils.LOG_TYPE_SUCCESS : MAS_Utils.LOG_TYPE_ERROR,
             Message__c = 'Run complete: ' + processedRecords + ' processed, ' + failedRecords + ' failed',
             Job_Id__c = jobId,
             Total_Records__c = totalRecords,
@@ -141,38 +158,53 @@ public with sharing class MAS_BatchRunner implements Database.Batchable<SObject>
     }
 
     /**
-     * Resolves a (possibly dotted) field path against a source record.
-     * Supports parent traversal such as Owner.Email or Account.Name.
+     * Maps target input parameter name -> declared data type, so record values
+     * pulled from SObject.get() (which returns real Id/Date/etc. Apex types) can
+     * be coerced to what Invocable.Action actually expects. This matters most for
+     * Flow targets: Flow has no "Id" variable type, so an Id value must become a
+     * String before it can be bound to a Flow's Text input.
      */
     @TestVisible
-    private Object getFieldValue(SObject record, String fieldPath) {
-        if (String.isBlank(fieldPath) || record == null) {
-            return null;
-        }
-        if (!fieldPath.contains('.')) {
-            return record.get(fieldPath);
-        }
-        List<String> parts = fieldPath.split('\\.');
-        SObject current = record;
-        for (Integer i = 0; i < parts.size() - 1; i++) {
-            current = current.getSObject(parts[i]);
-            if (current == null) {
-                return null;
+    private Map<String, String> describeParamTypes(Invocable.Action action) {
+        Map<String, String> types = new Map<String, String>();
+        List<Invocable.Action.DescribeResult> describes = action.getDescribe();
+        if (describes != null && !describes.isEmpty()) {
+            for (Invocable.Action.InputParameter ip : describes[0].getInputs()) {
+                types.put(ip.getName(), ip.getType());
             }
         }
-        return current.get(parts[parts.size() - 1]);
+        return types;
     }
 
-    private String describeFailure(List<SObject> scope, Integer index, Invocable.Action.Result r) {
+    @TestVisible
+    private Object coerceForTarget(Object value, String declaredType) {
+        if (value instanceof Id && String.isNotBlank(declaredType)) {
+            String upperType = declaredType.toUpperCase();
+            if (upperType != 'ID' && upperType != 'REFERENCE') {
+                return String.valueOf(value);
+            }
+        }
+        return value;
+    }
+
+    /**
+     * Builds a single "id: OK" or "id: FAILED - <errors>" line for one record
+     * in a batch chunk, so every run (success or failure) leaves a browsable
+     * per-record list in Long_Message__c.
+     */
+    private String describeRecord(List<SObject> scope, Integer index, Invocable.Action.Result r) {
         String recordId = (index < scope.size() && scope[index].get('Id') != null)
             ? String.valueOf(scope[index].get('Id'))
             : '(row ' + index + ')';
+        if (r.isSuccess()) {
+            return recordId + ': OK';
+        }
         List<String> msgs = new List<String>();
         if (r.getErrors() != null) {
             for (Invocable.Action.Error err : r.getErrors()) {
                 msgs.add(err.getMessage());
             }
         }
-        return recordId + ': ' + (msgs.isEmpty() ? 'Unknown error' : String.join(msgs, '; '));
+        return recordId + ': FAILED - ' + (msgs.isEmpty() ? 'Unknown error' : String.join(msgs, '; '));
     }
 }
