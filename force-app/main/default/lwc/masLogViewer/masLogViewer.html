@@ -1,5 +1,14 @@
 <template>
     <lightning-card title="Mass Action Logs" icon-name="standard:log_a_call">
+        <div slot="actions">
+            <lightning-button-icon
+                icon-name="utility:refresh"
+                alternative-text="Refresh"
+                title="Refresh"
+                disabled={isRefreshing}
+                onclick={handleRefresh}
+            ></lightning-button-icon>
+        </div>
         <div class="slds-p-horizontal_small">
             <template if:true={error}>
                 <div class="slds-text-color_error slds-p-around_small" role="alert">
@@ -15,7 +24,6 @@
                         data={logs}
                         hide-checkbox-column
                         column-widths-mode="auto"
-                        onrowaction={handleRowAction}
                     ></lightning-datatable>
                 </div>
             </template>

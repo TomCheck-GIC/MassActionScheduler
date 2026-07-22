@@ -327,23 +327,8 @@
                     </template>
 
                     <p class="slds-m-top_x-small slds-text-body_small slds-text-color_weak">
-                        Effective cron expression: <code>{config.Schedule_Cron__c}</code>
+                        Effective cron expression: <code>{config.Schedule_Cron__c}</code> - click <strong>Save</strong> below to apply it.
                     </p>
-
-                    <div class="slds-m-top_small">
-                        <lightning-button
-                            class="slds-m-right_x-small"
-                            label="Save Schedule"
-                            variant="brand"
-                            onclick={handleSaveSchedule}
-                        ></lightning-button>
-                        <lightning-button
-                            label="Unschedule"
-                            variant="destructive-text"
-                            onclick={handleUnschedule}
-                            disabled={noScheduledJob}
-                        ></lightning-button>
-                    </div>
                     <template if:true={hasScheduledJob}>
                         <p class="slds-m-top_x-small slds-text-body_small">
                             Current scheduled job: <strong>{config.Scheduled_Job_Id__c}</strong>
@@ -353,9 +338,16 @@
             </div>
 
             <!-- ==================== Last run summary ==================== -->
-            <template if:true={lastRunSummary}>
+            <template if:true={hasLastRun}>
                 <p class="slds-m-top_medium slds-text-body_small">
-                    Last run: <strong>{lastRunSummary}</strong>
+                    Last run: <strong>{config.Last_Run_Status__c}</strong> <span if:true={config.Last_Run_Completed_Date__c}>on <lightning-formatted-date-time
+                        value={config.Last_Run_Completed_Date__c}
+                        year="numeric"
+                        month="short"
+                        day="2-digit"
+                        hour="2-digit"
+                        minute="2-digit"
+                    ></lightning-formatted-date-time></span>
                 </p>
             </template>
         </div>

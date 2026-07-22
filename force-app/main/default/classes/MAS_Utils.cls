@@ -12,6 +12,7 @@ public with sharing class MAS_Utils {
     public static final String STATUS_COMPLETED_WITH_ERRORS = 'Completed with Errors';
     public static final String LOG_TYPE_ERROR = 'Error';
     public static final String LOG_TYPE_SUCCESS = 'Success';
+    public static final String LOG_TYPE_INFO = 'Informational';
 
     /**
      * Normalizes a configured batch size to a valid Database.executeBatch scope
@@ -94,6 +95,21 @@ public with sharing class MAS_Utils {
             return 'Monthly on ' + dayLabel + ' at ' + formatCronTime(hr, min);
         }
         return cron;
+    }
+
+    /**
+     * Keeps Schedule_Description__c consistent with Schedule_Type__c/Active__c/
+     * Schedule_Cron__c on every insert/update, regardless of which code path
+     * (wizard save, saveSchedule, unschedule, data load) touched the record.
+     * Populated only while the config is both Scheduled and Active; cleared
+     * otherwise so a stale description can't outlive the state it described.
+     */
+    public static void syncScheduleDescription(List<MAS_Configuration__c> records) {
+        for (MAS_Configuration__c c : records) {
+            c.Schedule_Description__c = (c.Active__c == true && c.Schedule_Type__c == 'Scheduled')
+                ? describeCron(c.Schedule_Cron__c)
+                : null;
+        }
     }
 
     private static Boolean isNumericCronToken(String token) {

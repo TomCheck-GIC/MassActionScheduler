@@ -1,5 +1,5 @@
 import { LightningElement, api, wire } from 'lwc';
-import { NavigationMixin } from 'lightning/navigation';
+import { refreshApex } from '@salesforce/apex';
 import getLogs from '@salesforce/apex/MAS_ConfigController.getLogs';
 
 // Datatable columns for the log grid.
@@ -28,32 +28,41 @@ const COLUMNS = [
         typeAttributes: { maximumFractionDigits: 1 }
     },
     {
-        type: 'button-icon',
-        typeAttributes: {
-            iconName: 'utility:preview',
-            name: 'view_details',
-            title: 'View Details',
-            alternativeText: 'View Details',
-            variant: 'border-filled'
-        },
-        fixedWidth: 56
+        label: 'Details',
+        fieldName: 'logUrl',
+        type: 'url',
+        // A real anchor (not a JS-driven row action), so ctrl/cmd-click,
+        // middle-click, and "open link in new tab" all work as expected.
+        typeAttributes: { label: 'View', target: '_self' },
+        fixedWidth: 90
     }
 ];
 
-export default class MasLogViewer extends NavigationMixin(LightningElement) {
+export default class MasLogViewer extends LightningElement {
     /** MAS_Configuration__c record Id. */
     @api recordId;
 
     columns = COLUMNS;
     logs = [];
     error;
+    isRefreshing = false;
 
+    _wiredResult;
+
+    // A run kicked off from the wizard (Run Now, or a scheduled job that fires
+    // while this tab is already open) completes asynchronously after this
+    // component's wire has already fetched - there's no push notification when
+    // new MAS_Log__c rows land, so a manual refresh is the only way to see them
+    // without reloading the whole page.
     @wire(getLogs, { configId: '$recordId' })
-    wiredLogs({ data, error }) {
+    wiredLogs(result) {
+        this._wiredResult = result;
+        const { data, error } = result;
         if (data) {
-            // percent type expects a fraction, so normalize 0-100 -> 0-1.
             this.logs = data.map((row) => ({
                 ...row,
+                logUrl: `/lightning/r/MAS_Log__c/${row.Id}/view`,
+                // percent type expects a fraction, so normalize 0-100 -> 0-1.
                 Batch_Success_Percentage__c:
                     row.Batch_Success_Percentage__c != null
                         ? row.Batch_Success_Percentage__c / 100
@@ -71,16 +80,13 @@ export default class MasLogViewer extends NavigationMixin(LightningElement) {
         return this.logs && this.logs.length > 0;
     }
 
-    handleRowAction(event) {
-        if (event.detail.action.name === 'view_details') {
-            this[NavigationMixin.Navigate]({
-                type: 'standard__recordPage',
-                attributes: {
-                    recordId: event.detail.row.Id,
-                    objectApiName: 'MAS_Log__c',
-                    actionName: 'view'
-                }
-            });
+    handleRefresh() {
+        if (!this._wiredResult) {
+            return;
         }
+        this.isRefreshing = true;
+        refreshApex(this._wiredResult).finally(() => {
+            this.isRefreshing = false;
+        });
     }
 }

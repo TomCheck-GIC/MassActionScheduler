@@ -25,24 +25,75 @@ public without sharing class MAS_BatchRunner implements Database.Batchable<SObje
     private Integer failedBatches = 0;
     private Map<String, String> paramTypesByName;
 
+    // The "Batch job started" log's id, captured so every per-batch chunk log
+    // in execute() can be parented to it immediately (see execute() below).
+    private Id startLogId;
+
     public MAS_BatchRunner(Id configId) {
         this.configId = configId;
     }
 
+    /**
+     * A "Batch job started" log is written here (once the query locator is
+     * known to be valid) rather than in execute(), so it lands before any
+     * per-batch work and is visible immediately - the same "started"/"finished"
+     * bookend logging the original dca_mass_action package produced. It's
+     * created with no Parent_Log__c yet (nothing to nest it under until the
+     * run finishes), so it's the one top-level entry getLogs() surfaces for
+     * the duration of the run; finish() folds it under the final summary once
+     * the run completes.
+     *
+     * Any failure here (bad SOQL, missing configuration, etc.) happens before
+     * any record work begins, so it's caught and logged as an Error rather
+     * than left as a silent AsyncApexJob failure with no MAS_Log__c trail -
+     * then rethrown so the job's own status still reflects the failure.
+     */
     public Database.QueryLocator start(Database.BatchableContext bc) {
-        this.config = [
-            SELECT Id, Name, Source_SOQL_Query__c, Target_Type__c, Target_Action_Name__c
-            FROM MAS_Configuration__c
-            WHERE Id = :configId
-            LIMIT 1
-        ];
-        this.mappings = [
-            SELECT Source_Field_Name__c, Target_Parameter_Name__c, Is_Literal__c
-            FROM MAS_Field_Mapping__c
-            WHERE Configuration__c = :configId
-        ];
-        update new MAS_Configuration__c(Id = configId, Last_Run_Status__c = MAS_Utils.STATUS_RUNNING);
-        return Database.getQueryLocator(config.Source_SOQL_Query__c);
+        try {
+            this.config = [
+                SELECT Id, Name, Source_SOQL_Query__c, Target_Type__c, Target_Action_Name__c
+                FROM MAS_Configuration__c
+                WHERE Id = :configId
+                LIMIT 1
+            ];
+            this.mappings = [
+                SELECT Source_Field_Name__c, Target_Parameter_Name__c, Is_Literal__c
+                FROM MAS_Field_Mapping__c
+                WHERE Configuration__c = :configId
+            ];
+            update new MAS_Configuration__c(Id = configId, Last_Run_Status__c = MAS_Utils.STATUS_RUNNING);
+            Database.QueryLocator locator = Database.getQueryLocator(config.Source_SOQL_Query__c);
+            MAS_Log__c startLog = new MAS_Log__c(
+                Configuration__c = configId,
+                Message_Type__c = MAS_Utils.LOG_TYPE_INFO,
+                Message__c = 'Batch job started.',
+                Job_Id__c = bc.getJobId(),
+                Timestamp__c = System.now()
+            );
+            insert startLog;
+            this.startLogId = startLog.Id;
+            return locator;
+        } catch (Exception e) {
+            logStartFailure(bc, e);
+            throw e;
+        }
+    }
+
+    private void logStartFailure(Database.BatchableContext bc, Exception e) {
+        insert new MAS_Log__c(
+            Configuration__c = configId,
+            Message_Type__c = MAS_Utils.LOG_TYPE_ERROR,
+            Message__c = 'Batch job failed to start: ' + e.getMessage(),
+            Job_Id__c = bc.getJobId(),
+            Timestamp__c = System.now()
+        );
+        try {
+            update new MAS_Configuration__c(Id = configId, Last_Run_Status__c = MAS_Utils.STATUS_FAILED);
+        } catch (Exception ignored) {
+            // Configuration may itself be missing/deleted; the error log above is the source of truth.
+            System.debug(LoggingLevel.WARN, 'MAS_BatchRunner.logStartFailure: could not mark configuration Failed: '
+                + ignored.getMessage());
+        }
     }
 
     public void execute(Database.BatchableContext bc, List<SObject> scope) {
@@ -99,6 +150,11 @@ public without sharing class MAS_BatchRunner implements Database.Batchable<SObje
         Integer batchProcessed = scope.size() - batchFailed;
         insert new MAS_Log__c(
             Configuration__c = configId,
+            // Parented to the start log immediately, not left dangling at the
+            // top level until finish() runs - otherwise every chunk log would
+            // flood getLogs()'s top-level view for the entire duration of a
+            // long-running batch job, only collapsing down once it finishes.
+            Parent_Log__c = startLogId,
             Message_Type__c = (batchFailed > 0) ? MAS_Utils.LOG_TYPE_ERROR : MAS_Utils.LOG_TYPE_SUCCESS,
             Message__c = batchProcessed + ' of ' + scope.size() + ' record(s) processed in this batch',
             Long_Message__c = String.join(recordLines, '\n').abbreviate(32768),
@@ -139,7 +195,15 @@ public without sharing class MAS_BatchRunner implements Database.Batchable<SObje
         );
         insert summary;
 
-        // Link any per-batch error logs to the summary log.
+        // Flatten every log tied to this run - the start log, and every chunk
+        // log already parented beneath it from execute() - to be a *direct*
+        // child of the final summary, not left nested two levels deep under
+        // the start log. Chunk logs were parented to the start log the moment
+        // each was written (so they never sit unparented at the top level
+        // while the run is still in progress), but once the run is done the
+        // summary's own Child Logs related list should show the start marker
+        // and every batch chunk as direct siblings, matching what an admin
+        // browsing from the summary record actually expects to see.
         List<MAS_Log__c> children = [
             SELECT Id FROM MAS_Log__c WHERE Job_Id__c = :jobId AND Id != :summary.Id
         ];
@@ -149,6 +213,19 @@ public without sharing class MAS_BatchRunner implements Database.Batchable<SObje
             }
             update children;
         }
+
+        // Symmetric "finished" bookend to the "Batch job started." log written
+        // in start() - the same started/finished pair the original
+        // dca_mass_action package produced - as a direct child of the summary,
+        // alongside the start log and every chunk log.
+        insert new MAS_Log__c(
+            Configuration__c = configId,
+            Parent_Log__c = summary.Id,
+            Message_Type__c = MAS_Utils.LOG_TYPE_INFO,
+            Message__c = 'Batch job completed.',
+            Job_Id__c = jobId,
+            Timestamp__c = System.now()
+        );
 
         update new MAS_Configuration__c(
             Id = configId,

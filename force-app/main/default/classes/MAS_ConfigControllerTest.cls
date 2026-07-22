@@ -99,15 +99,45 @@ private class MAS_ConfigControllerTest {
         Test.startTest();
         String jobId = MAS_ConfigController.saveSchedule(cfg.Id, '0 0 6 * * ?');
         Assert.isTrue(String.isNotBlank(jobId), 'Schedule returns a job id');
-        MAS_Configuration__c scheduled = [SELECT Scheduled_Job_Id__c, Schedule_Type__c FROM MAS_Configuration__c WHERE Id = :cfg.Id];
+        MAS_Configuration__c scheduled = [
+            SELECT Scheduled_Job_Id__c, Schedule_Type__c, Schedule_Description__c
+            FROM MAS_Configuration__c WHERE Id = :cfg.Id
+        ];
         Assert.areEqual(jobId, scheduled.Scheduled_Job_Id__c, 'Job id stored');
         Assert.areEqual('Scheduled', scheduled.Schedule_Type__c, 'Schedule type set');
+        Assert.areEqual('Daily at 6:00 AM', scheduled.Schedule_Description__c, 'Plain-English schedule description stamped');
 
         MAS_ConfigController.unschedule(cfg.Id);
         Test.stopTest();
 
         MAS_Configuration__c cleared = [SELECT Scheduled_Job_Id__c FROM MAS_Configuration__c WHERE Id = :cfg.Id];
         Assert.areEqual(null, cleared.Scheduled_Job_Id__c, 'Job id cleared after unschedule');
+    }
+
+    @IsTest
+    static void scheduleDescriptionOnlyPopulatedWhenScheduledAndActive() {
+        MAS_Configuration__c cfg = makeConfig(); // Active__c = true, Schedule_Type__c defaults to Manual
+        MAS_ConfigController.saveSchedule(cfg.Id, '0 0 6 * * ?');
+
+        MAS_Configuration__c afterSchedule = [
+            SELECT Schedule_Description__c FROM MAS_Configuration__c WHERE Id = :cfg.Id
+        ];
+        Assert.areEqual('Daily at 6:00 AM', afterSchedule.Schedule_Description__c,
+            'Scheduled + Active populates the description');
+
+        update new MAS_Configuration__c(Id = cfg.Id, Active__c = false);
+        MAS_Configuration__c afterDeactivate = [
+            SELECT Schedule_Description__c FROM MAS_Configuration__c WHERE Id = :cfg.Id
+        ];
+        Assert.areEqual(null, afterDeactivate.Schedule_Description__c,
+            'Deactivating clears the description even though Schedule_Type__c is still Scheduled');
+
+        update new MAS_Configuration__c(Id = cfg.Id, Active__c = true, Schedule_Type__c = 'Manual');
+        MAS_Configuration__c afterSwitchToManual = [
+            SELECT Schedule_Description__c FROM MAS_Configuration__c WHERE Id = :cfg.Id
+        ];
+        Assert.areEqual(null, afterSwitchToManual.Schedule_Description__c,
+            'Switching back to Manual clears the description even though Active__c is true');
     }
 
     @IsTest

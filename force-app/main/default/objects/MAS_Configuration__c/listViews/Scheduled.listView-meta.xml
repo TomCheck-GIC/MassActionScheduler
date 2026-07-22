@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ListView xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Scheduled</fullName>
+    <filterScope>Everything</filterScope>
+    <label>Scheduled</label>
+    <filters>
+        <field>Schedule_Type__c</field>
+        <operation>equals</operation>
+        <value>Scheduled</value>
+    </filters>
+    <filters>
+        <field>Active__c</field>
+        <operation>equals</operation>
+        <value>1</value>
+    </filters>
+    <columns>NAME</columns>
+    <columns>Target_Type__c</columns>
+    <columns>Target_Action_Name__c</columns>
+    <columns>Schedule_Description__c</columns>
+    <columns>Last_Run_Status__c</columns>
+    <columns>Last_Run_Completed_Date__c</columns>
+</ListView>

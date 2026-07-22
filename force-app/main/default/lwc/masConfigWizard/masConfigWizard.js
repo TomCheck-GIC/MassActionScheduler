@@ -1,5 +1,6 @@
 import { LightningElement, api, track, wire } from 'lwc';
 import { ShowToastEvent } from 'lightning/platformShowToastEvent';
+import { refreshApex } from '@salesforce/apex';
 
 // Apex controller methods (exact shapes provided by the package controller)
 import getConfig from '@salesforce/apex/MAS_ConfigController.getConfig';
@@ -124,6 +125,14 @@ export default class MasConfigWizard extends LightningElement {
     _configReady = false;
     _mappingsReady = false;
 
+    // Raw @wire results for getConfig/getMappings, kept so handleSave can
+    // force a genuine server refetch (refreshApex) after saving. Without
+    // this, the cacheable wires can replay their pre-save cached value on a
+    // later re-subscription and silently overwrite the just-saved local
+    // state with stale data.
+    _configWireResult;
+    _mappingsWireResult;
+
     // Radio option definitions ----------------------------------------------
     targetTypeOptions = [
         { label: 'Flow', value: TARGET_FLOW },
@@ -194,7 +203,9 @@ export default class MasConfigWizard extends LightningElement {
     }
 
     @wire(getConfig, { configId: '$recordId' })
-    wiredConfig({ data, error }) {
+    wiredConfig(result) {
+        this._configWireResult = result;
+        const { data, error } = result;
         if (data) {
             // Copy sObject into a mutable plain object; the wizard edits this
             // locally, it does not mutate the wired value directly.
@@ -211,7 +222,9 @@ export default class MasConfigWizard extends LightningElement {
     }
 
     @wire(getMappings, { configId: '$recordId' })
-    wiredMappings({ data, error }) {
+    wiredMappings(result) {
+        this._mappingsWireResult = result;
+        const { data, error } = result;
         if (data) {
             this.mappings = this.relabelMappings(data.map((m, i) => this.toMappingRow(m, i)));
         } else if (error) {
@@ -274,10 +287,6 @@ export default class MasConfigWizard extends LightningElement {
 
     get hasScheduledJob() {
         return !!this.config.Scheduled_Job_Id__c;
-    }
-
-    get noScheduledJob() {
-        return !this.config.Scheduled_Job_Id__c;
     }
 
     get hasPreview() {
@@ -344,14 +353,8 @@ export default class MasConfigWizard extends LightningElement {
         return `${pad(this.scheduleBuilder.hour)}:${pad(this.scheduleBuilder.minute)}:00.000`;
     }
 
-    get lastRunSummary() {
-        if (!this.config.Last_Run_Status__c) {
-            return null;
-        }
-        const when = this.config.Last_Run_Completed_Date__c
-            ? ` on ${this.config.Last_Run_Completed_Date__c}`
-            : '';
-        return `${this.config.Last_Run_Status__c}${when}`;
+    get hasLastRun() {
+        return !!this.config.Last_Run_Status__c;
     }
 
     // ----- Basic field handlers -------------------------------------------
@@ -587,46 +590,6 @@ export default class MasConfigWizard extends LightningElement {
         this.config = { ...this.config, Schedule_Cron__c: cron };
     }
 
-    async handleSaveSchedule() {
-        if (!this.recordId) {
-            this.showToast('Save first', 'Save the configuration before scheduling.', 'warning');
-            return;
-        }
-        if (!this.config.Schedule_Cron__c) {
-            this.showToast('No cron', 'Enter or pick a cron expression.', 'warning');
-            return;
-        }
-        this.isLoading = true;
-        try {
-            const jobId = await saveSchedule({
-                configId: this.recordId,
-                cronExpression: this.config.Schedule_Cron__c
-            });
-            this.config = { ...this.config, Scheduled_Job_Id__c: jobId };
-            this.showToast('Scheduled', `Job Id: ${jobId}`, 'success');
-        } catch (error) {
-            this.showError('Failed to schedule', error);
-        } finally {
-            this.isLoading = false;
-        }
-    }
-
-    async handleUnschedule() {
-        if (!this.recordId) {
-            return;
-        }
-        this.isLoading = true;
-        try {
-            await unschedule({ configId: this.recordId });
-            this.config = { ...this.config, Scheduled_Job_Id__c: null };
-            this.showToast('Unscheduled', 'The scheduled job was removed.', 'success');
-        } catch (error) {
-            this.showError('Failed to unschedule', error);
-        } finally {
-            this.isLoading = false;
-        }
-    }
-
     // ----- Footer actions --------------------------------------------------
     /** Reports validity on required/bounded fields; returns false and stops the save if any fail. */
     isFormValid() {
@@ -646,24 +609,73 @@ export default class MasConfigWizard extends LightningElement {
         }
         this.isLoading = true;
         try {
-            // Build a plain object matching MAS_Configuration__c field API names.
+            // Snapshot every value this save needs from local state up front,
+            // before any awaited Apex call. The getConfig/getMappings wires are
+            // cacheable, and a DML against this record can cause them to replay
+            // their pre-edit cached value into this.config/this.mappings while
+            // this save's own await chain is still in flight (proven live: an
+            // unprompted getActionInputs call fired between the saveSchedule and
+            // saveMappings calls below, which only happens if wiredConfig
+            // re-ran). Re-reading this.config/this.mappings after an await risks
+            // building a later call (saveSchedule, saveMappings) from that
+            // clobbered stale data instead of what the user actually just
+            // edited - silently reverting/failing the save instead of just
+            // mis-displaying it.
             const payload = { ...this.config };
             if (this.recordId) {
                 payload.Id = this.recordId;
             }
-            const savedId = await saveConfig({ config: payload });
-            this.recordId = this.recordId || savedId;
-            this.config = { ...this.config, Id: savedId };
-
-            // Persist mappings against the (now guaranteed) config Id.
+            const scheduleType = payload.Schedule_Type__c;
+            const scheduleCron = payload.Schedule_Cron__c;
+            const hadScheduledJob = payload.Scheduled_Job_Id__c;
             const mappingPayload = this.mappings.map((m) => ({
                 Source_Field_Name__c: m.Source_Field_Name__c,
                 Target_Parameter_Name__c: m.Target_Parameter_Name__c,
                 Is_Literal__c: !!m.Is_Literal__c
             }));
+
+            const savedId = await saveConfig({ config: payload });
+            this.recordId = this.recordId || savedId;
+            this.config = { ...this.config, Id: savedId };
+
+            // Reconcile the actual scheduled batch job with whatever schedule
+            // state was just saved. Save is the single action that both
+            // persists the configuration and (un)schedules its job - there's
+            // no separate "Save Schedule" step that can drift out of sync
+            // with a Schedule_Cron__c the user just edited but never actually
+            // applied to the real CronTrigger.
+            if (scheduleType === SCHEDULE_SCHEDULED) {
+                if (!scheduleCron) {
+                    this.showToast('No cron', 'Enter or pick a cron expression before saving a scheduled configuration.', 'warning');
+                } else {
+                    const jobId = await saveSchedule({
+                        configId: savedId,
+                        cronExpression: scheduleCron
+                    });
+                    this.config = { ...this.config, Scheduled_Job_Id__c: jobId };
+                }
+            } else if (hadScheduledJob) {
+                await unschedule({ configId: savedId });
+                this.config = { ...this.config, Scheduled_Job_Id__c: null };
+            }
+
+            // Persist mappings against the (now guaranteed) config Id.
             await saveMappings({ configId: savedId, mappings: mappingPayload });
 
-            this.showToast('Saved', 'Configuration and mappings saved.', 'success');
+            // The getConfig/getMappings wires are cacheable, and a later
+            // re-subscription (e.g. the record page re-rendering this
+            // component after the DML above) can replay their pre-save
+            // cached value, clobbering the local state just set above with
+            // stale data. Forcing a real refetch here - as the last step of
+            // save - guarantees this.config/this.mappings end up reflecting
+            // what the server actually has, regardless of any such replay.
+            await Promise.all(
+                [this._configWireResult, this._mappingsWireResult]
+                    .filter(Boolean)
+                    .map((wired) => refreshApex(wired))
+            );
+
+            this.showToast('Saved', 'Configuration, schedule, and mappings saved.', 'success');
             // Notify any parent / enable record page refresh.
             this.dispatchEvent(new CustomEvent('saved', { detail: { recordId: savedId } }));
         } catch (error) {

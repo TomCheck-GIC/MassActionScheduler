@@ -104,6 +104,11 @@
         <editable>true</editable>
     </fieldPermissions>
     <fieldPermissions>
+        <field>MAS_Configuration__c.Schedule_Description__c</field>
+        <readable>true</readable>
+        <editable>true</editable>
+    </fieldPermissions>
+    <fieldPermissions>
         <field>MAS_Configuration__c.Scheduled_Job_Id__c</field>
         <readable>true</readable>
         <editable>true</editable>

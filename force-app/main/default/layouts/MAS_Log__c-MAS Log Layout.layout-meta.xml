@@ -115,14 +115,26 @@
         </layoutColumns>
         <style>OneColumn</style>
     </layoutSections>
+    <layoutSections>
+        <customLabel>false</customLabel>
+        <detailHeading>false</detailHeading>
+        <editHeading>false</editHeading>
+        <layoutColumns/>
+        <style>CustomLinks</style>
+    </layoutSections>
     <relatedLists>
         <fields>NAME</fields>
         <fields>Message_Type__c</fields>
+        <fields>Message__c</fields>
         <fields>Timestamp__c</fields>
         <fields>Total_Records__c</fields>
         <fields>Processed_Records__c</fields>
         <fields>Failed_Records__c</fields>
         <relatedList>MAS_Log__c.Parent_Log__c</relatedList>
     </relatedLists>
+    <showEmailCheckbox>false</showEmailCheckbox>
     <showHighlightsPanel>false</showHighlightsPanel>
+    <showInteractionLogPanel>false</showInteractionLogPanel>
+    <showRunAssignmentRulesCheckbox>false</showRunAssignmentRulesCheckbox>
+    <showSubmitAndAttachButton>false</showSubmitAndAttachButton>
 </Layout>

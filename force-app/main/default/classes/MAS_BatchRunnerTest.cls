@@ -53,11 +53,16 @@ private class MAS_BatchRunnerTest {
         Assert.areNotEqual(null, after.Last_Run_Completed_Date__c, 'Completed date set');
 
         // A clean chunk (no failures) should still leave a browsable per-record
-        // detail log, not just an aggregate count.
+        // detail log, not just an aggregate count. Chunk logs are parented to
+        // the run's start log (not directly to the summary - see
+        // jobStartLogIsWrittenAndFoldedUnderTheSummaryAsAChild for that nesting),
+        // so select by "not top-level, not the Informational start log itself"
+        // rather than by a specific parent id.
         MAS_Log__c chunkLog = [
             SELECT Message_Type__c, Long_Message__c, Total_Records__c, Processed_Records__c,
                    Failed_Records__c, Batch_Success_Percentage__c
-            FROM MAS_Log__c WHERE Configuration__c = :cfg.Id AND Parent_Log__c = :summary.Id
+            FROM MAS_Log__c
+            WHERE Configuration__c = :cfg.Id AND Parent_Log__c != null AND Message_Type__c != 'Informational'
             LIMIT 1
         ];
         Assert.areEqual('Success', chunkLog.Message_Type__c, 'Clean chunk should log as Success');
@@ -174,6 +179,90 @@ private class MAS_BatchRunnerTest {
 
         MAS_Configuration__c after = [SELECT Last_Run_Status__c FROM MAS_Configuration__c WHERE Id = :cfg.Id];
         Assert.areEqual('Failed', after.Last_Run_Status__c, 'Status should be Failed when nothing processed');
+    }
+
+    @IsTest
+    static void jobStartLogIsWrittenAndFoldedUnderTheSummaryAsAChild() {
+        seedAccounts(3);
+        MAS_Configuration__c cfg = makeConfig('MAS_SampleAction');
+        insert new MAS_Field_Mapping__c(
+            Configuration__c = cfg.Id,
+            Source_Field_Name__c = 'Name',
+            Target_Parameter_Name__c = 'recordName',
+            Is_Literal__c = false
+        );
+
+        Test.startTest();
+        Database.executeBatch(new MAS_BatchRunner(cfg.Id), 200);
+        Test.stopTest();
+
+        MAS_Log__c summary = [
+            SELECT Id, Job_Id__c FROM MAS_Log__c
+            WHERE Configuration__c = :cfg.Id AND Parent_Log__c = null
+            ORDER BY CreatedDate DESC LIMIT 1
+        ];
+        MAS_Log__c startLog = [
+            SELECT Id, Message_Type__c, Message__c, Parent_Log__c, Job_Id__c
+            FROM MAS_Log__c WHERE Configuration__c = :cfg.Id AND Message__c = 'Batch job started.'
+            LIMIT 1
+        ];
+        Assert.areEqual('Informational', startLog.Message_Type__c, 'The start log uses the Informational message type');
+        Assert.areEqual(summary.Job_Id__c, startLog.Job_Id__c, 'The start log shares the same batch job id as the summary');
+        Assert.areEqual(summary.Id, startLog.Parent_Log__c,
+            'The start log is a direct child of the summary once the run finishes');
+
+        // Chunk logs are parented to the start log the moment they're written
+        // in execute() (so they never sit unparented at the top level while a
+        // long run is still in progress), but finish() flattens everything
+        // under the summary - so from the summary's own Child Logs related
+        // list, chunk logs should show up as direct siblings of the start
+        // log, not nested two levels deep underneath it.
+        MAS_Log__c chunkLog = [
+            SELECT Parent_Log__c FROM MAS_Log__c
+            WHERE Configuration__c = :cfg.Id AND Message_Type__c != 'Informational' AND Parent_Log__c != null
+            LIMIT 1
+        ];
+        Assert.areEqual(summary.Id, chunkLog.Parent_Log__c,
+            'Chunk logs end up as direct children of the summary, flattened alongside the start log, '
+            + 'not left nested under the start log');
+
+        MAS_Log__c completedLog = [
+            SELECT Message_Type__c, Job_Id__c, Parent_Log__c
+            FROM MAS_Log__c WHERE Configuration__c = :cfg.Id AND Message__c = 'Batch job completed.'
+            LIMIT 1
+        ];
+        Assert.areEqual('Informational', completedLog.Message_Type__c, 'The completed log uses the Informational message type');
+        Assert.areEqual(summary.Job_Id__c, completedLog.Job_Id__c, 'The completed log shares the same batch job id as the summary');
+        Assert.areEqual(summary.Id, completedLog.Parent_Log__c,
+            'The completed log is a direct child of the summary, the symmetric bookend to the start log');
+    }
+
+    @IsTest
+    static void startFailureBeforeAnyWorkIsLoggedAsErrorAndConfigMarkedFailed() {
+        MAS_Configuration__c cfg = makeConfig('MAS_SampleAction');
+        cfg.Source_SOQL_Query__c = 'SELECT Id FROM Not_A_Real_Object__x';
+        update cfg;
+
+        Test.startTest();
+        Boolean threw = false;
+        try {
+            Database.executeBatch(new MAS_BatchRunner(cfg.Id), 200);
+            Test.stopTest();
+        } catch (Exception e) {
+            threw = true;
+        }
+        Assert.isTrue(threw, 'A malformed source query should surface as a thrown exception, not fail silently');
+
+        List<MAS_Log__c> errorLogs = [
+            SELECT Message_Type__c, Message__c FROM MAS_Log__c
+            WHERE Configuration__c = :cfg.Id AND Message_Type__c = 'Error'
+        ];
+        Assert.areEqual(1, errorLogs.size(), 'A single error log should be written before any batch work begins');
+        Assert.isTrue(errorLogs[0].Message__c.startsWith('Batch job failed to start:'),
+            'The error log should explain that the failure happened during start, not mid-run');
+
+        MAS_Configuration__c after = [SELECT Last_Run_Status__c FROM MAS_Configuration__c WHERE Id = :cfg.Id];
+        Assert.areEqual('Failed', after.Last_Run_Status__c, 'The configuration should be marked Failed even though no batch work ever ran');
     }
 
     @IsTest
