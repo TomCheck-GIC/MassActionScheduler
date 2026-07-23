@@ -1,12 +1,21 @@
 {
   "packageDirectories": [
     {
+      "versionName": "ver 0.2",
+      "versionNumber": "0.2.0.NEXT",
       "path": "force-app",
-      "default": true
+      "default": true,
+      "package": "Mass Action Scheduler",
+      "versionDescription": "Renamed MAS_ -> MAS_GIC_ prefix to avoid naming collisions."
     }
   ],
   "name": "MassActionScheduler",
   "namespace": "",
   "sfdcLoginUrl": "https://login.salesforce.com",
-  "sourceApiVersion": "66.0"
+  "sourceApiVersion": "66.0",
+  "packageAliases": {
+    "Mass Action Scheduler": "0Hofj0000002bptCAA",
+    "Mass Action Scheduler@0.1.0-1": "04tfj000000NvYfAAK",
+    "Mass Action Scheduler@0.2.0-1": "04tfj000000NwUjAAK"
+  }
 }

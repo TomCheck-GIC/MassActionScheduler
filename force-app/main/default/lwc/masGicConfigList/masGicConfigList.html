@@ -1,0 +1,48 @@
+<template>
+    <template if:false={showWizard}>
+        <lightning-card title="Mass Action Configurations" icon-name="standard:settings">
+            <div slot="actions">
+                <lightning-button
+                    label="View All"
+                    icon-name="utility:list"
+                    class="slds-m-right_x-small"
+                    onclick={handleViewAll}
+                ></lightning-button>
+                <lightning-button
+                    label="New Configuration"
+                    variant="brand"
+                    icon-name="utility:add"
+                    onclick={handleNew}
+                ></lightning-button>
+            </div>
+
+            <div class="slds-p-horizontal_medium slds-p-vertical_small">
+                <p class="slds-text-body_regular">
+                    Create a new Mass Action configuration, or open an existing
+                    configuration record to edit its source query, target action,
+                    field mappings, and schedule.
+                </p>
+                <p class="slds-text-body_small slds-text-color_weak slds-m-top_x-small">
+                    Configurations are managed from their record pages.
+                </p>
+                <ul class="slds-list_dotted slds-m-top_small slds-text-body_small">
+                    <li>Each configuration runs a SOQL query, maps the results to a Flow or invocable Apex action's input parameters, and processes matching records in batches.</li>
+                    <li>Use <strong>Run Now</strong> for an on-demand run, or set a <strong>Schedule</strong> to run automatically on a recurring basis.</li>
+                    <li>Every run is recorded on the configuration's <strong>Logs</strong> tab, with per-batch and per-record results.</li>
+                </ul>
+                <p class="slds-text-body_small slds-m-top_small">See the <strong>Scheduled Jobs</strong> tab for a summary of every configuration that's currently on a schedule.</p>
+            </div>
+        </lightning-card>
+    </template>
+
+    <template if:true={showWizard}>
+        <div class="slds-m-bottom_small">
+            <lightning-button
+                label="Cancel"
+                icon-name="utility:back"
+                onclick={handleCancelNew}
+            ></lightning-button>
+        </div>
+        <c-mas-gic-config-wizard onsaved={handleWizardSaved}></c-mas-gic-config-wizard>
+    </template>
+</template>
