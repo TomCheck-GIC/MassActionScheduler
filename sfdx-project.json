@@ -5,8 +5,8 @@
       "versionNumber": "0.2.0.NEXT",
       "path": "force-app",
       "default": true,
-      "package": "Mass Action Scheduler",
-      "versionDescription": "Renamed MAS_ -> MAS_GIC_ prefix to avoid naming collisions."
+      "package": "Mass Action Scheduler - Callout Free Edition",
+      "versionDescription": "Renamed app to Mass Action Scheduler - CFE; added Doug Ayers attribution to homepage."
     }
   ],
   "name": "MassActionScheduler",
@@ -14,8 +14,9 @@
   "sfdcLoginUrl": "https://login.salesforce.com",
   "sourceApiVersion": "66.0",
   "packageAliases": {
-    "Mass Action Scheduler": "0Hofj0000002bptCAA",
+    "Mass Action Scheduler - Callout Free Edition": "0Hofj0000002bptCAA",
     "Mass Action Scheduler@0.1.0-1": "04tfj000000NvYfAAK",
-    "Mass Action Scheduler@0.2.0-1": "04tfj000000NwUjAAK"
+    "Mass Action Scheduler@0.2.0-1": "04tfj000000NwUjAAK",
+    "Mass Action Scheduler - Callout Free Edition@0.2.0-2": "04tfj000000O0bZAAS"
   }
 }

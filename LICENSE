@@ -1,0 +1,43 @@
+"Mass Action Scheduler - Callout-Free Edition" is an independent, from-scratch
+reimplementation inspired by the original "Mass Action Scheduler"
+(sfdx-mass-action-scheduler) by Doug Ayers (douglascayers.com), archived in 2023:
+https://github.com/douglascayers/sfdx-mass-action-scheduler
+
+It was built using the original project's public documentation and behavior as a
+functional reference; the object model, field names, and Apex/LWC implementation here are
+independently written, not copied from the original source files. As a courtesy to the
+original author, and because the two projects solve the same problem, this project's own
+code is licensed under the same BSD 3-Clause terms as the original. The original project's
+copyright notice and license text are reproduced below unmodified.
+
+---
+
+BSD 3-Clause License
+
+Copyright (c) 2017-2023, Doug Ayers, douglascayers.com
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+* Redistributions of source code must retain the above copyright notice, this
+  list of conditions and the following disclaimer.
+
+* Redistributions in binary form must reproduce the above copyright notice,
+  this list of conditions and the following disclaimer in the documentation
+  and/or other materials provided with the distribution.
+
+* Neither the name of the copyright holder nor the names of its
+  contributors may be used to endorse or promote products derived from
+  this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
