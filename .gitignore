@@ -46,6 +46,7 @@ $RECYCLE.BIN/
 .claude/
 CLAUDE.md
 .mcp.json
+Claude Code Files/
 
 # Python Salesforce Functions
 **/__pycache__/
