@@ -11,12 +11,11 @@
     <tabs>MAS_GIC_Scheduled_Jobs_Page</tabs>
     <tabs>MAS_GIC_Configuration__c</tabs>
     <tabs>MAS_GIC_Log__c</tabs>
-    <profileActionOverrides>
+    <actionOverrides>
         <actionName>View</actionName>
         <content>MAS_GIC_Record_Page</content>
         <formFactor>Large</formFactor>
         <pageOrSobjectType>MAS_GIC_Configuration__c</pageOrSobjectType>
-        <profile>Admin</profile>
         <type>Flexipage</type>
-    </profileActionOverrides>
+    </actionOverrides>
 </CustomApplication>

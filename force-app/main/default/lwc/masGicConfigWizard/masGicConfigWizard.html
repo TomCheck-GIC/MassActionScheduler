@@ -327,11 +327,11 @@
                     </template>
 
                     <p class="slds-m-top_x-small slds-text-body_small slds-text-color_weak">
-                        Effective cron expression: <code>{config.Schedule_Cron__c}</code> - click <strong>Save</strong> below to apply it.
+                        Effective cron expression:&nbsp;<code>{config.Schedule_Cron__c}</code>&nbsp;- click&nbsp;<strong>Save</strong>&nbsp;below to apply it.
                     </p>
                     <template if:true={hasScheduledJob}>
                         <p class="slds-m-top_x-small slds-text-body_small">
-                            Current scheduled job: <strong>{config.Scheduled_Job_Id__c}</strong>
+                            Current scheduled job:&nbsp;<strong>{config.Scheduled_Job_Id__c}</strong>
                         </p>
                     </template>
                 </template>
@@ -340,7 +340,7 @@
             <!-- ==================== Last run summary ==================== -->
             <template if:true={hasLastRun}>
                 <p class="slds-m-top_medium slds-text-body_small">
-                    Last run: <strong>{config.Last_Run_Status__c}</strong> <span if:true={config.Last_Run_Completed_Date__c}>on <lightning-formatted-date-time
+                    Last run:&nbsp;<strong>{config.Last_Run_Status__c}</strong>&nbsp;<span if:true={config.Last_Run_Completed_Date__c}>on&nbsp;<lightning-formatted-date-time
                         value={config.Last_Run_Completed_Date__c}
                         year="numeric"
                         month="short"
