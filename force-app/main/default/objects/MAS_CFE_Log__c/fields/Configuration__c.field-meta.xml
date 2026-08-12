@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Configuration__c</fullName>
+    <label>Configuration</label>
+    <type>Lookup</type>
+    <referenceTo>MAS_CFE_Configuration__c</referenceTo>
+    <relationshipName>Logs</relationshipName>
+    <relationshipLabel>Logs</relationshipLabel>
+    <deleteConstraint>SetNull</deleteConstraint>
+</CustomField>

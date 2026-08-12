@@ -1,12 +1,12 @@
 {
   "packageDirectories": [
     {
-      "versionName": "ver 0.2",
-      "versionNumber": "0.2.0.NEXT",
+      "versionName": "ver 0.3",
+      "versionNumber": "0.3.0.NEXT",
       "path": "force-app",
       "default": true,
       "package": "Mass Action Scheduler - Callout Free Edition",
-      "versionDescription": "Renamed app to Mass Action Scheduler - CFE; added Doug Ayers attribution to homepage."
+      "versionDescription": "Renamed API prefix from MAS_GIC_ to MAS_CFE_ to remove client-specific branding from the package."
     }
   ],
   "name": "MassActionScheduler",

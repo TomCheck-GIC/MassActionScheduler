@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
-    <fullName>Schedule_Description__c</fullName>
-    <label>Schedule Description</label>
-    <type>Text</type>
-    <length>255</length>
-    <description>Plain-English summary of Schedule_Cron__c (e.g. "Daily at 6:00 AM"), stamped by MAS_GIC_ConfigController.saveSchedule via MAS_GIC_Utils.describeCron. Not user-editable in the UI.</description>
-</CustomField>

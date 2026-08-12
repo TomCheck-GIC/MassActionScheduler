@@ -31,17 +31,17 @@ and no Remote Site Setting.** All work is done natively in Apex:
 | Discover target inputs | `Invocable.Action.getDescribe().getInputs()` (Flow **and** Apex) |
 | List active flows | `FlowDefinitionView` SOQL |
 | Schedule | `System.schedule()` + stored CronTrigger Id |
-| Logging | `MAS_GIC_Log__c` summary + per-batch error rows |
+| Logging | `MAS_CFE_Log__c` summary + per-batch error rows |
 
 ## Components
 
-- **Objects:** `MAS_GIC_Configuration__c`, `MAS_GIC_Field_Mapping__c` (master-detail child),
-  `MAS_GIC_Log__c`.
-- **Apex:** `MAS_GIC_BatchRunner` (Batchable/Stateful), `MAS_GIC_Scheduler` (Schedulable),
-  `MAS_GIC_ConfigController` (`@AuraEnabled` for the wizard), `MAS_GIC_RunConfigInvocable`
-  (`@InvocableMethod` for programmatic runs), `MAS_GIC_Utils`, `MAS_GIC_SampleAction` (demo target).
-- **LWC:** `masGicConfigWizard`, `masGicConfigList`, `masGicLogViewer`.
-- **App / access:** `Mass Action Scheduler - CFE` app + tabs, `MAS_GIC_Admin` permission set.
+- **Objects:** `MAS_CFE_Configuration__c`, `MAS_CFE_Field_Mapping__c` (master-detail child),
+  `MAS_CFE_Log__c`.
+- **Apex:** `MAS_CFE_BatchRunner` (Batchable/Stateful), `MAS_CFE_Scheduler` (Schedulable),
+  `MAS_CFE_ConfigController` (`@AuraEnabled` for the wizard), `MAS_CFE_RunConfigInvocable`
+  (`@InvocableMethod` for programmatic runs), `MAS_CFE_Utils`, `MAS_CFE_SampleAction` (demo target).
+- **LWC:** `masCfeConfigWizard`, `masCfeConfigList`, `masCfeLogViewer`.
+- **App / access:** `Mass Action Scheduler - CFE` app + tabs, `MAS_CFE_Admin` permission set.
 
 ## Setup (scratch org dev loop)
 
@@ -53,7 +53,7 @@ and no Remote Site Setting.** All work is done natively in Apex:
 # from the project root
 sf org create scratch -f config/project-scratch-def.json -a mas-dev -d 30
 sf project deploy start -o mas-dev
-sf org assign permset -n MAS_GIC_Admin -o mas-dev
+sf org assign permset -n MAS_CFE_Admin -o mas-dev
 sf apex run test -o mas-dev -l RunLocalTests -w 10
 ```
 
@@ -73,7 +73,7 @@ picker can see all active autolaunched flows.
 7. Review results under **Logs**.
 
 Programmatic run (from a Flow/automation): call **Run Mass Action Configuration**
-(`MAS_GIC_RunConfigInvocable`) with a Configuration Id or Developer Name.
+(`MAS_CFE_RunConfigInvocable`) with a Configuration Id or Developer Name.
 
 ## Packaging (2GP unlocked)
 
@@ -91,5 +91,5 @@ sf package install -p <version-id> -o "LWV CSPartial" -w 30
 - Max 100 concurrent scheduled Apex jobs org-wide; the config stores its CronTrigger Id
   and aborts it on reschedule/deactivate.
 - Runs as the launching (Run Now) or scheduling user - no impersonation.
-- A record page for `MAS_GIC_Configuration__c` embedding `masGicConfigWizard` + `masGicLogViewer`
+- A record page for `MAS_CFE_Configuration__c` embedding `masCfeConfigWizard` + `masCfeLogViewer`
   can be created in Lightning App Builder after deploy (or added as a FlexiPage).
